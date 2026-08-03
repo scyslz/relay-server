@@ -32,6 +32,7 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
   const [bodyContent, setBodyContent] = useState<string>('{\n  "username": "admin_test",\n  "query": "system_status"\n}');
   
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
+  const [headersError, setHeadersError] = useState<string>('');
   const [responseResult, setResponseResult] = useState<TestResponsePayload | null>(null);
   const [activeResTab, setActiveResTab] = useState<'body' | 'headers' | 'logs'>('body');
 
@@ -79,13 +80,16 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
     setIsExecuting(true);
     setResponseResult(null);
 
-    let parsedHeaders = {};
-    try {
-      if (headersJson.trim()) {
+    let parsedHeaders: Record<string, any> = {};
+    if (headersJson.trim()) {
+      try {
         parsedHeaders = JSON.parse(headersJson);
+        setHeadersError('');
+      } catch (err: any) {
+        setHeadersError(`Invalid headers JSON — not dispatched: ${err.message}`);
+        setIsExecuting(false);
+        return;
       }
-    } catch {
-      parsedHeaders = { 'Content-Type': 'application/json' };
     }
 
     try {
@@ -216,9 +220,15 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
               <textarea
                 rows={3}
                 value={headersJson}
-                onChange={(e) => setHeadersJson(e.target.value)}
-                className={`w-full ${styles.codeBg} border ${styles.codeBorder} rounded-lg p-2.5 font-mono text-[11px] ${styles.codeText} focus:outline-none focus:border-emerald-500`}
+                onChange={(e) => {
+                  setHeadersJson(e.target.value);
+                  setHeadersError('');
+                }}
+                className={`w-full ${styles.codeBg} border ${headersError ? 'border-rose-500' : styles.codeBorder} rounded-lg p-2.5 font-mono text-[11px] ${styles.codeText} focus:outline-none focus:border-emerald-500`}
               />
+              {headersError && (
+                <p className="text-rose-400 text-[11px] break-all">{headersError}</p>
+              )}
             </div>
 
             {/* Request Body if POST/PUT/PATCH */}

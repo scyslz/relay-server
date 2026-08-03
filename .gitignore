@@ -10,5 +10,9 @@ coverage/
 # Runtime-persisted configuration (root only; NOT src/data source files)
 /data/
 
+# Local config file (copy from config.json.example — never committed, so
+# repo updates never overwrite your running configuration)
+/config.json
+
 # Packaging artifacts
 *.zip

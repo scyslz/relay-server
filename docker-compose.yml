@@ -5,12 +5,11 @@ services:
     image: ghcr.io/scyslz/relay-server:latest
     container_name: relay-server
     restart: unless-stopped
-    ports:
-      - "${RELAY_PORT:-3000}:3000"       # Admin console / system server (server.listenPort in config.json)
-      - "${RELAY_APP_PORT:-8081}:8081"   # Example app (listenPort of app-api-gateway in config.json)
     volumes:
-      # Optional: preload apps/routes from a file. The server also writes
-      # its config back here, so edits in the UI are persisted to config.json.
+      # Optional: preload apps/routes from a local config file. config.json is
+      # your own untracked file (create it once: cp config.json.example config.json),
+      # so repo updates never overwrite your running configuration. The server
+      # also writes config changes made in the UI back to this file.
       # Remove this line to start fresh and configure everything from the UI.
       - ./config.json:/app/data/relay-config.json
       # Writable storage for execution logs (survives container recreation).

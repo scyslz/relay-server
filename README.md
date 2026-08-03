@@ -36,16 +36,18 @@ A prebuilt multi-arch image (amd64 + arm64) is published to
 `ghcr.io/scyslz/relay-server` by CI. Run it with Docker Compose:
 
 ```bash
+cp config.json.example config.json   # only needed once, to preload sample apps/routes
 docker compose up -d
 ```
 
 - Admin console / system server: `http://localhost:3000`
 - Example app: `http://localhost:8081`
 
-[`config.json`](config.json) preloads the example apps/routes on first start;
-it is mounted into `/app/data/relay-config.json` and written back on every
-change made in the UI. Execution logs persist in the `relay_logs` volume.
-Remove the config mount to start empty and configure everything from the UI.
+Your local `config.json` is mounted into `/app/data/relay-config.json` and
+written back on every change made in the UI. It is git-ignored, so updating
+the repo never overwrites your running configuration. Execution logs persist
+in the `relay_logs` volume. Remove the config mount to start empty and
+configure everything from the UI.
 
 Build the image yourself:
 
@@ -55,7 +57,7 @@ docker compose up -d   # or: docker run -p 3000:3000 -p 8081:8081 relay-server:l
 ```
 
 Adjust the ports in `docker-compose.yml` to match the `listenPort` values in
-[`config.json`](config.json) for the system server and each app.
+your `config.json` (or `config.json.example`) for the system server and each app.
 
 > **Note:** the container runs as a non-root user, so it can only write changes
 > back to a host-mounted `config.json` if that file is writable by the
