@@ -25,12 +25,42 @@ registered App and run custom handler scripts.
 
 1. Install dependencies:
    `npm install`
-2. Configure environment variables (see [.env.example](.env.example)):
-   `cp .env.example .env.local`
-3. Run the app:
+2. Run the app:
    `npm run dev`
 
 The admin console is served at `http://localhost:3000`.
+
+## Run with Docker
+
+A prebuilt multi-arch image (amd64 + arm64) is published to
+`ghcr.io/scyslz/relay-server` by CI. Run it with Docker Compose:
+
+```bash
+docker compose up -d
+```
+
+- Admin console / system server: `http://localhost:3000`
+- Example app: `http://localhost:8081`
+
+[`config.json`](config.json) preloads the example apps/routes on first start;
+it is mounted into `/app/data/relay-config.json` and written back on every
+change made in the UI. Execution logs persist in the `relay_logs` volume.
+Remove the config mount to start empty and configure everything from the UI.
+
+Build the image yourself:
+
+```bash
+docker build -t relay-server:local .
+docker compose up -d   # or: docker run -p 3000:3000 -p 8081:8081 relay-server:local
+```
+
+Adjust the ports in `docker-compose.yml` to match the `listenPort` values in
+[`config.json`](config.json) for the system server and each app.
+
+> **Note:** the container runs as a non-root user, so it can only write changes
+> back to a host-mounted `config.json` if that file is writable by the
+> container's UID. If the UI stops persisting edits, make it writable:
+> `chmod 666 config.json` (or `chown` it to the container's `relay` UID).
 
 ## Scripts
 

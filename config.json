@@ -1,0 +1,64 @@
+{
+  "format": "json",
+  "updatedAt": "2026-08-03T00:00:00.000Z",
+  "server": {
+    "name": "Relay Hub Server",
+    "basePath": "/",
+    "listenHost": "0.0.0.0",
+    "listenPort": 3000
+  },
+  "apps": [
+    {
+      "id": "app-api-gateway",
+      "name": "API Gateway",
+      "description": "Example app listening on its own port",
+      "listenHost": "0.0.0.0",
+      "listenPort": 8081,
+      "basePath": "/api/v1",
+      "enabled": true,
+      "isDefault": false,
+      "createdAt": "2026-08-03T00:00:00.000Z",
+      "updatedAt": "2026-08-03T03:26:27.646Z"
+    }
+  ],
+  "routes": [
+    {
+      "id": "route-users-list",
+      "appId": "app-api-gateway",
+      "name": "User Directory Mock Route",
+      "description": "Simulates a paginated user list response",
+      "matchTarget": "path",
+      "matchStrategy": "prefix",
+      "pathPattern": "/api/v1/users",
+      "hostPattern": "*",
+      "httpMethods": [
+        "GET"
+      ],
+      "code": "const page = parseInt(request.query?.page || '1', 10);\n\nconsole.log(`Fetching users page ${page}`);\n\nconst mockUsers = [\n  { id: 101, name: 'Alice Chen', role: 'admin' },\n  { id: 102, name: 'Bob Smith', role: 'developer' },\n  { id: 103, name: 'Charlie Kim', role: 'guest' }\n];\n\nresponse.status(200).json({\n  success: true,\n  page: page,\n  total: 42,\n  data: mockUsers\n});",
+      "enabled": true,
+      "priority": 10,
+      "isDefault": false,
+      "createdAt": "2026-08-03T00:00:00.000Z",
+      "updatedAt": "2026-08-03T00:00:00.000Z"
+    },
+    {
+      "id": "route-user-detail",
+      "appId": "app-api-gateway",
+      "name": "User Profile Dynamic Route",
+      "description": "Fetches a user by dynamic path parameter",
+      "matchTarget": "path",
+      "matchStrategy": "equal",
+      "pathPattern": "/users/:id",
+      "hostPattern": "*",
+      "httpMethods": [
+        "GET"
+      ],
+      "code": "const userId = request.params?.id || request.query?.id || '101';\nconsole.log('Fetching profile for dynamic user ID:', userId);\n\nresponse.status(200).json({\n  success: true,\n  userId: userId,\n  user: {\n    id: userId,\n    name: userId === '101' ? 'Alice Chen' : `User_${userId}`,\n    email: `user_${userId}@example.com`,\n    createdAt: new Date().toISOString()\n  }\n});",
+      "enabled": true,
+      "priority": 8,
+      "isDefault": false,
+      "createdAt": "2026-08-03T00:00:00.000Z",
+      "updatedAt": "2026-08-03T00:00:00.000Z"
+    }
+  ]
+}

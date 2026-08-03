@@ -6,7 +6,6 @@ data
 *.log
 npm-debug.log*
 bun.lock
-relay-server-&-route-hub.zip
 .env
 .env.*
 Dockerfile
