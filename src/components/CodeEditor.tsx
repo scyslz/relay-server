@@ -1,12 +1,20 @@
 import React, { useState } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 import { Code, Copy, Check, Sparkles } from 'lucide-react';
+import { ThemeMode } from '../types';
 
 interface CodeEditorProps {
   value: string;
   onChange: (val: string) => void;
   height?: string;
+  theme?: ThemeMode;
 }
+
+const EDITOR_COLORS: Record<ThemeMode, { monaco: string; bg: string; toolbarBg: string; border: string; text: string }> = {
+  dark: { monaco: 'vs-dark', bg: '#1e1e1e', toolbarBg: '#252526', border: 'border-slate-800', text: 'text-slate-300' },
+  light: { monaco: 'vs', bg: '#ffffff', toolbarBg: '#f8fafc', border: 'border-slate-200', text: 'text-slate-600' },
+  midnight: { monaco: 'vs-dark', bg: '#000000', toolbarBg: '#09090b', border: 'border-zinc-800', text: 'text-zinc-300' },
+};
 
 // JS Completion suggestions for the fallback editor
 const JS_SUGGESTIONS = [
@@ -20,9 +28,10 @@ const JS_SUGGESTIONS = [
   { label: 'request.method', detail: 'Get HTTP method string', insert: 'request.method' },
 ];
 
-export const CodeEditor: React.FC<CodeEditorProps> = ({ value, onChange, height = '100%' }) => {
+export const CodeEditor: React.FC<CodeEditorProps> = ({ value, onChange, height = '100%', theme = 'dark' }) => {
   const [copied, setCopied] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const colors = EDITOR_COLORS[theme];
 
   // Configure Monaco Editor JS Type Definitions & Completion
   const handleEditorDidMount: OnMount = (_editor, monaco) => {
@@ -156,9 +165,9 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ value, onChange, height 
   };
 
   return (
-    <div className="flex flex-col h-full border border-slate-800 rounded-xl overflow-hidden bg-[#1e1e1e] font-mono text-xs shadow-inner">
+    <div className={`flex flex-col h-full border ${colors.border} rounded-xl overflow-hidden font-mono text-xs shadow-inner transition-colors`} style={{ backgroundColor: colors.bg }}>
       {/* Editor Sub-toolbar */}
-      <div className="px-3 py-1.5 bg-[#252526] border-b border-slate-800 flex items-center justify-between text-[11px] text-slate-300 font-mono shrink-0">
+      <div className={`px-3 py-1.5 border-b ${colors.border} flex items-center justify-between text-[11px] ${colors.text} font-mono shrink-0 transition-colors`} style={{ backgroundColor: colors.toolbarBg }}>
         <span className="flex items-center gap-1.5">
           <Code className="w-3.5 h-3.5 text-indigo-400" />
           <span>Script Handler: <code className="text-emerald-400">async (request, response)</code></span>
@@ -178,8 +187,8 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ value, onChange, height 
 
             {/* Suggestions Popup */}
             {showSuggestions && (
-              <div className="absolute right-0 top-full mt-1.5 z-50 w-64 bg-[#252526] border border-slate-700 rounded-xl shadow-2xl p-1.5 space-y-1 text-xs">
-                <div className="text-[10px] text-slate-400 px-2 py-1 uppercase tracking-wider font-semibold border-b border-slate-700/60">
+              <div className={`absolute right-0 top-full mt-1.5 z-50 w-64 border ${colors.border} rounded-xl shadow-2xl p-1.5 space-y-1 text-xs transition-colors`} style={{ backgroundColor: colors.toolbarBg }}>
+                <div className={`text-[10px] ${colors.text} opacity-70 px-2 py-1 uppercase tracking-wider font-semibold border-b ${colors.border}`}>
                   JavaScript Code Hints
                 </div>
                 {JS_SUGGESTIONS.map((s, idx) => (
@@ -190,7 +199,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ value, onChange, height 
                     className="w-full text-left px-2 py-1.5 rounded hover:bg-indigo-600/30 hover:text-white transition-colors flex flex-col group"
                   >
                     <span className="font-mono text-indigo-300 group-hover:text-indigo-200 font-semibold">{s.label}</span>
-                    <span className="text-[10px] text-slate-400">{s.detail}</span>
+                    <span className={`text-[10px] ${colors.text} opacity-70`}>{s.detail}</span>
                   </button>
                 ))}
               </div>
@@ -200,7 +209,8 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ value, onChange, height 
           <button
             type="button"
             onClick={copyCode}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-slate-400 hover:text-slate-200 bg-slate-800/80 hover:bg-slate-700 border border-slate-700 transition-colors"
+            className={`flex items-center gap-1 px-2 py-0.5 rounded ${colors.text} hover:opacity-80 border ${colors.border} transition-colors`}
+            style={{ backgroundColor: colors.toolbarBg }}
           >
             {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
             <span>{copied ? 'Copied' : 'Copy'}</span>
@@ -209,12 +219,12 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ value, onChange, height 
       </div>
 
       {/* Monaco Editor */}
-      <div className="relative flex-1 min-h-[200px] overflow-hidden bg-[#1e1e1e]">
+      <div className="relative flex-1 min-h-[200px] overflow-hidden" style={{ backgroundColor: colors.bg }}>
         <Editor
           height={height}
           defaultLanguage="javascript"
           language="javascript"
-          theme="vs-dark"
+          theme={colors.monaco}
           value={value}
           onChange={(val) => onChange(val || '')}
           onMount={handleEditorDidMount}

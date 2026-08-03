@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Play, Clock, Terminal, Send, Sparkles } from 'lucide-react';
-import { AppConfig, Route, TestResponsePayload } from '../types';
+import { AppConfig, Route, TestResponsePayload, ThemeMode } from '../types';
+import { THEME_STYLES } from '../theme';
 import { CustomSelect } from './CustomSelect';
 
 interface TestSimulatorModalProps {
@@ -9,6 +10,7 @@ interface TestSimulatorModalProps {
   apps: AppConfig[];
   routes: Route[];
   initialRoute?: Route | null;
+  theme?: ThemeMode;
 }
 
 export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
@@ -16,8 +18,10 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
   onClose,
   apps,
   routes,
-  initialRoute
+  initialRoute,
+  theme = 'dark'
 }) => {
+  const styles = THEME_STYLES[theme];
   const defaultAppId = initialRoute ? initialRoute.appId : (apps[0]?.id || '');
   
   const [selectedAppId, setSelectedAppId] = useState<string>(defaultAppId);
@@ -115,36 +119,36 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-5xl lg:max-w-6xl shadow-2xl overflow-hidden flex flex-col h-[90vh] max-h-[850px]">
+    <div className={`fixed inset-0 z-50 flex items-center justify-center ${styles.overlayBg} backdrop-blur-sm p-4 overflow-y-auto`}>
+      <div className={`${styles.modalBg} border ${styles.modalBorder} rounded-2xl w-full max-w-5xl lg:max-w-6xl shadow-2xl overflow-hidden flex flex-col h-[90vh] max-h-[850px]`}>
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+        <div className={`px-6 py-4 border-b ${styles.borderSubtle} flex items-center justify-between`}>
           <div className="flex items-center space-x-3">
             <div className="p-2 bg-emerald-600/20 text-emerald-400 rounded-lg border border-emerald-500/30">
               <Play className="w-5 h-5 fill-current" />
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-slate-100">HTTP Request Simulator</h3>
-              <p className="text-xs text-slate-400">Dispatch test requests and inspect script console outputs live</p>
+              <h3 className={`text-lg font-semibold ${styles.textPrimary}`}>HTTP Request Simulator</h3>
+              <p className={`text-xs ${styles.textMuted}`}>Dispatch test requests and inspect script console outputs live</p>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors"
+            className={`p-1.5 ${styles.textMuted} hover:text-indigo-400 hover:bg-indigo-500/10 rounded-lg transition-colors`}
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Content Area */}
-        <div className="grid grid-cols-1 md:grid-cols-12 flex-1 overflow-hidden divide-y md:divide-y-0 md:divide-x divide-slate-800 text-xs">
+        <div className={`grid grid-cols-1 md:grid-cols-12 flex-1 overflow-hidden divide-y md:divide-y-0 md:divide-x ${styles.borderSubtle} text-xs`}>
           {/* Request Config Column */}
-          <div className="md:col-span-6 p-5 space-y-4 overflow-y-auto bg-slate-900/50">
+          <div className={`md:col-span-6 p-5 space-y-4 overflow-y-auto ${styles.panelBg}`}>
             {/* App & Route Selection */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="block text-slate-300 font-medium">Target App</label>
+                <label className={`block ${styles.textSecondary} font-medium`}>Target App</label>
                 <CustomSelect
                   value={selectedAppId}
                   onChange={(val) => handleAppChange(val)}
@@ -154,11 +158,12 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
                     subtitle: a.basePath
                   }))}
                   className="w-full"
+                  theme={theme}
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="block text-slate-300 font-medium">Target Route (Optional)</label>
+                <label className={`block ${styles.textSecondary} font-medium`}>Target Route (Optional)</label>
                 <CustomSelect
                   value={selectedRouteId}
                   placeholder="Auto-Match Route Rule"
@@ -172,14 +177,15 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
                     }))
                   ]}
                   className="w-full"
+                  theme={theme}
                 />
               </div>
             </div>
 
             {/* Request Method & URL bar */}
             <div className="space-y-1">
-              <label className="block text-slate-300 font-medium">HTTP Request Endpoint</label>
-              <div className="flex rounded-lg overflow-hidden border border-slate-700 bg-slate-800">
+              <label className={`block ${styles.textSecondary} font-medium`}>HTTP Request Endpoint</label>
+              <div className={`flex rounded-lg overflow-hidden border ${styles.inputBorder} ${styles.inputBg}`}>
                 <CustomSelect
                   value={method}
                   onChange={(val) => setMethod(val)}
@@ -190,7 +196,8 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
                     { value: 'DELETE', label: 'DELETE' },
                     { value: 'PATCH', label: 'PATCH' }
                   ]}
-                  buttonClassName="text-emerald-400 font-mono font-bold bg-slate-900 border-none rounded-none border-r border-slate-700 px-3 py-2"
+                  buttonClassName="text-emerald-400 font-mono font-bold border-none rounded-none border-r border-slate-700 px-3 py-2"
+                  theme={theme}
                 />
 
                 <input
@@ -198,31 +205,31 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
                   value={urlPath}
                   onChange={(e) => setUrlPath(e.target.value)}
                   placeholder="/path"
-                  className="flex-1 bg-transparent px-3 py-2 text-slate-100 font-mono focus:outline-none"
+                  className={`flex-1 bg-transparent px-3 py-2 ${styles.inputText} font-mono focus:outline-none`}
                 />
               </div>
             </div>
 
             {/* Headers JSON */}
             <div className="space-y-1">
-              <label className="block text-slate-300 font-medium">Request Headers (JSON)</label>
+              <label className={`block ${styles.textSecondary} font-medium`}>Request Headers (JSON)</label>
               <textarea
                 rows={3}
                 value={headersJson}
                 onChange={(e) => setHeadersJson(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 font-mono text-[11px] text-slate-200 focus:outline-none focus:border-emerald-500"
+                className={`w-full ${styles.codeBg} border ${styles.codeBorder} rounded-lg p-2.5 font-mono text-[11px] ${styles.codeText} focus:outline-none focus:border-emerald-500`}
               />
             </div>
 
             {/* Request Body if POST/PUT/PATCH */}
             {method !== 'GET' && (
               <div className="space-y-1">
-                <label className="block text-slate-300 font-medium">Request Body Payload</label>
+                <label className={`block ${styles.textSecondary} font-medium`}>Request Body Payload</label>
                 <textarea
                   rows={4}
                   value={bodyContent}
                   onChange={(e) => setBodyContent(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 font-mono text-[11px] text-slate-200 focus:outline-none focus:border-emerald-500"
+                  className={`w-full ${styles.codeBg} border ${styles.codeBorder} rounded-lg p-2.5 font-mono text-[11px] ${styles.codeText} focus:outline-none focus:border-emerald-500`}
                 />
               </div>
             )}
@@ -231,7 +238,7 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
             <button
               onClick={handleRunSimulator}
               disabled={isExecuting}
-              className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white font-medium rounded-lg shadow-md flex items-center justify-center gap-2 transition-all"
+              className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white font-medium rounded-lg shadow-md flex items-center justify-center gap-2 transition-all"
             >
               <Send className="w-4 h-4" />
               <span>{isExecuting ? 'Dispatching & Running Script...' : 'Dispatch Test Request'}</span>
@@ -239,10 +246,10 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
           </div>
 
           {/* Response Output Column */}
-          <div className="md:col-span-6 p-5 flex flex-col bg-slate-950 overflow-hidden">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-3">
+          <div className={`md:col-span-6 p-5 flex flex-col ${styles.panelBg} overflow-hidden`}>
+            <div className={`flex items-center justify-between border-b ${styles.borderSubtle} pb-2 mb-3`}>
               <div className="flex items-center space-x-3">
-                <span className="font-semibold text-slate-200">Execution Output</span>
+                <span className={`font-semibold ${styles.textPrimary}`}>Execution Output</span>
                 {responseResult && (
                   <span className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded ${
                     responseResult.status >= 200 && responseResult.status < 400
@@ -255,8 +262,8 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
               </div>
 
               {responseResult && (
-                <div className="flex items-center gap-1 text-slate-400 font-mono text-[11px]">
-                  <Clock className="w-3.5 h-3.5 text-slate-500" />
+                <div className={`flex items-center gap-1 ${styles.textMuted} font-mono text-[11px]`}>
+                  <Clock className={`w-3.5 h-3.5 ${styles.textMuted}`} />
                   <span>{responseResult.durationMs}ms</span>
                 </div>
               )}
@@ -265,11 +272,11 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
             {/* Response Sub Tabs */}
             {responseResult ? (
               <div className="flex-1 flex flex-col overflow-hidden">
-                <div className="flex space-x-3 border-b border-slate-800/80 mb-2 pb-1 font-mono text-[11px]">
+                <div className={`flex space-x-3 border-b ${styles.borderSubtle} mb-2 pb-1 font-mono text-[11px]`}>
                   <button
                     onClick={() => setActiveResTab('body')}
                     className={`pb-1 border-b-2 transition-colors ${
-                      activeResTab === 'body' ? 'border-emerald-500 text-emerald-400 font-bold' : 'border-transparent text-slate-500 hover:text-slate-300'
+                      activeResTab === 'body' ? 'border-emerald-500 text-emerald-400 font-bold' : `border-transparent ${styles.textMuted} hover:text-indigo-400`
                     }`}
                   >
                     Response Body
@@ -277,7 +284,7 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
                   <button
                     onClick={() => setActiveResTab('headers')}
                     className={`pb-1 border-b-2 transition-colors ${
-                      activeResTab === 'headers' ? 'border-emerald-500 text-emerald-400 font-bold' : 'border-transparent text-slate-500 hover:text-slate-300'
+                      activeResTab === 'headers' ? 'border-emerald-500 text-emerald-400 font-bold' : `border-transparent ${styles.textMuted} hover:text-indigo-400`
                     }`}
                   >
                     Headers
@@ -285,7 +292,7 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
                   <button
                     onClick={() => setActiveResTab('logs')}
                     className={`pb-1 border-b-2 transition-colors flex items-center gap-1 ${
-                      activeResTab === 'logs' ? 'border-emerald-500 text-emerald-400 font-bold' : 'border-transparent text-slate-500 hover:text-slate-300'
+                      activeResTab === 'logs' ? 'border-emerald-500 text-emerald-400 font-bold' : `border-transparent ${styles.textMuted} hover:text-indigo-400`
                     }`}
                   >
                     <Terminal className="w-3 h-3" />
@@ -294,7 +301,7 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
                 </div>
 
                 {/* Tab Output Box */}
-                <div className="flex-1 overflow-y-auto bg-slate-900 border border-slate-800/80 rounded-xl p-3 font-mono text-[11px]">
+                <div className={`flex-1 overflow-y-auto ${styles.codeBg} border ${styles.codeBorder} rounded-xl p-3 font-mono text-[11px]`}>
                   {activeResTab === 'body' && (
                     <pre className="text-emerald-300 whitespace-pre-wrap font-mono">
                       {typeof responseResult.body === 'string'
@@ -306,8 +313,8 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
                   {activeResTab === 'headers' && (
                     <div className="space-y-1">
                       {Object.entries(responseResult.headers || {}).map(([k, v]) => (
-                        <div key={k} className="flex justify-between border-b border-slate-800/50 pb-1">
-                          <span className="text-slate-400">{k}:</span>
+                        <div key={k} className={`flex justify-between border-b ${styles.borderSubtle} pb-1`}>
+                          <span className={styles.textMuted}>{k}:</span>
                           <span className="text-indigo-300">{String(v)}</span>
                         </div>
                       ))}
@@ -317,7 +324,7 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
                   {activeResTab === 'logs' && (
                     <div className="space-y-1">
                       {(!responseResult.logs || responseResult.logs.length === 0) ? (
-                        <p className="text-slate-500 italic">No console statements recorded during execution.</p>
+                        <p className={`${styles.textMuted} italic`}>No console statements recorded during execution.</p>
                       ) : (
                         responseResult.logs.map((logMsg, i) => (
                           <div
@@ -325,7 +332,7 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
                             className={`p-1.5 rounded font-mono ${
                               logMsg.includes('[ERROR]') ? 'bg-rose-500/10 text-rose-300 border border-rose-500/20' :
                               logMsg.includes('[WARN]') ? 'bg-amber-500/10 text-amber-300 border border-amber-500/20' :
-                              'text-slate-300'
+                              styles.codeText
                             }`}
                           >
                             {logMsg}
@@ -337,9 +344,9 @@ export const TestSimulatorModal: React.FC<TestSimulatorModalProps> = ({
                 </div>
               </div>
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-center p-6 border border-dashed border-slate-800 rounded-xl">
+              <div className={`flex-1 flex flex-col items-center justify-center ${styles.textMuted} text-center p-6 border border-dashed ${styles.borderSubtle} rounded-xl`}>
                 <Sparkles className="w-8 h-8 mb-2 opacity-40 text-emerald-400" />
-                <p className="font-medium text-sm text-slate-400">Ready for Request Dispatch</p>
+                <p className={`font-medium text-sm ${styles.textSecondary}`}>Ready for Request Dispatch</p>
                 <p className="text-xs mt-1 max-w-xs">Click "Dispatch Test Request" to execute JS route handler and view output.</p>
               </div>
             )}

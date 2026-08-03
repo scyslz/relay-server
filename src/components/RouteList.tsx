@@ -21,7 +21,7 @@ export const RouteList: React.FC<RouteListProps> = ({
   routes,
   selectedApp,
   selectedRouteId,
-  theme = 'dark',
+  theme = 'dark' as ThemeMode,
   onSelectRoute,
   onEditRoute,
   onDeleteRoute,
@@ -126,7 +126,7 @@ export const RouteList: React.FC<RouteListProps> = ({
                   {/* Route Title & Matching Specs */}
                   <div className="space-y-1.5 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className={`font-semibold text-base ${styles.textHeading}`}>
+                      <span className={`font-semibold text-base ${styles.textPrimary}`}>
                         {route.name}
                       </span>
 
@@ -221,13 +221,13 @@ export const RouteList: React.FC<RouteListProps> = ({
                 </div>
 
                 {/* JS Code Block Preview snippet */}
-                <div className={`mt-3 ${styles.codeBg} rounded-lg border ${styles.codeBorder} p-2.5 overflow-x-auto relative`}>
+                <div className={`mt-3 ${theme === 'light' ? 'bg-slate-100 border-slate-300' : `${styles.codeBg} ${styles.codeBorder}`} rounded-lg border p-2.5 overflow-x-auto relative transition-colors`}>
                   <div className={`flex items-center justify-between text-[10px] ${styles.textMuted} mb-1 border-b ${styles.borderSubtle} pb-1 font-mono`}>
                     <span>JS Handler Script</span>
                     <span>request, response</span>
                   </div>
                   <div className="overflow-x-auto max-h-32 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700">
-                    {highlightJS(route.code)}
+                    {highlightJS(route.code, theme)}
                   </div>
                 </div>
               </div>

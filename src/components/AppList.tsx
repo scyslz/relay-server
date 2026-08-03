@@ -65,7 +65,7 @@ export const AppList: React.FC<AppListProps> = ({
               <div className="flex items-start justify-between">
                 <div className="space-y-1">
                   <div className="flex items-center space-x-2">
-                    <span className={`font-semibold text-sm group-hover:text-indigo-400 transition-colors ${styles.textHeading}`}>
+                    <span className={`font-semibold text-sm group-hover:text-indigo-400 transition-colors ${styles.textPrimary}`}>
                       {app.name}
                     </span>
 

@@ -24,6 +24,8 @@ export interface ThemeStyles {
   badgeText: string;
   modalBg: string;
   modalBorder: string;
+  overlayBg: string;
+  panelBg: string;
   buttonSecondary: string;
 }
 
@@ -52,6 +54,8 @@ export const THEME_STYLES: Record<ThemeMode, ThemeStyles> = {
     badgeText: 'text-slate-300',
     modalBg: 'bg-slate-900',
     modalBorder: 'border-slate-800',
+    overlayBg: 'bg-slate-950/80',
+    panelBg: 'bg-slate-950',
     buttonSecondary: 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700',
   },
   light: {
@@ -78,6 +82,8 @@ export const THEME_STYLES: Record<ThemeMode, ThemeStyles> = {
     badgeText: 'text-slate-800',
     modalBg: 'bg-white',
     modalBorder: 'border-slate-200',
+    overlayBg: 'bg-slate-900/60',
+    panelBg: 'bg-slate-50',
     buttonSecondary: 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300',
   },
   midnight: {
@@ -104,6 +110,8 @@ export const THEME_STYLES: Record<ThemeMode, ThemeStyles> = {
     badgeText: 'text-zinc-300',
     modalBg: 'bg-zinc-950',
     modalBorder: 'border-zinc-800',
+    overlayBg: 'bg-black/80',
+    panelBg: 'bg-black',
     buttonSecondary: 'bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border-zinc-800',
   },
 };

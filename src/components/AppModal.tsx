@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { X, Server, AlertTriangle, Save, Network, Globe } from 'lucide-react';
-import { AppConfig, ValidationResult } from '../types';
+import { AppConfig, ValidationResult, ThemeMode } from '../types';
+import { THEME_STYLES } from '../theme';
 
 interface AppModalProps {
   isOpen: boolean;
   onClose: () => void;
   app: AppConfig | null;
   onSaveApp: (appData: Partial<AppConfig>) => Promise<{ success: boolean; validation?: ValidationResult; error?: string }>;
+  theme?: ThemeMode;
 }
 
 type FieldName = 'name' | 'listenHost' | 'listenPort' | 'basePath';
@@ -68,8 +70,10 @@ export const AppModal: React.FC<AppModalProps> = ({
   isOpen,
   onClose,
   app,
-  onSaveApp
+  onSaveApp,
+  theme = 'dark'
 }) => {
+  const styles = THEME_STYLES[theme];
   // listenPort may be '' while the user is clearing the input; it is normalized on submit.
   const [formData, setFormData] = useState<AppFormData>({
     name: '',
@@ -154,25 +158,25 @@ export const AppModal: React.FC<AppModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-3 sm:p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-xl sm:rounded-2xl w-full max-w-lg sm:max-w-xl lg:max-w-2xl shadow-2xl overflow-hidden">
+    <div className={`fixed inset-0 z-50 flex items-center justify-center ${styles.overlayBg} backdrop-blur-sm p-3 sm:p-4`}>
+      <div className={`${styles.modalBg} border ${styles.modalBorder} rounded-xl sm:rounded-2xl w-full max-w-lg sm:max-w-xl lg:max-w-2xl shadow-2xl overflow-hidden`}>
         {/* Header */}
-        <div className="px-4 py-3 sm:px-6 sm:py-4 border-b border-slate-800 flex items-center justify-between">
+        <div className={`px-4 py-3 sm:px-6 sm:py-4 border-b ${styles.borderSubtle} flex items-center justify-between`}>
           <div className="flex items-center space-x-3">
             <div className="p-2 bg-indigo-600/20 text-indigo-400 rounded-lg border border-indigo-500/30">
               <Server className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base sm:text-lg font-semibold text-slate-100">
+              <h3 className={`text-base sm:text-lg font-semibold ${styles.textPrimary}`}>
                 {app ? `Edit App: ${app.name}` : 'New App'}
               </h3>
-              <p className="text-[11px] text-slate-400">Configure host, port, and base path</p>
+              <p className={`text-[11px] ${styles.textMuted}`}>Configure host, port, and base path</p>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors"
+            className={`p-1.5 ${styles.textMuted} hover:text-indigo-400 hover:bg-indigo-500/10 rounded-lg transition-colors`}
           >
             <X className="w-5 h-5" />
           </button>
@@ -180,7 +184,7 @@ export const AppModal: React.FC<AppModalProps> = ({
 
         {/* Validation Error Banner */}
         {validationResult && (
-          <div className="px-4 py-2 bg-slate-950 border-b border-slate-800 text-xs space-y-1">
+          <div className={`px-4 py-2 ${styles.panelBg} border-b ${styles.borderSubtle} text-xs space-y-1`}>
             {validationResult.errors.map((err, idx) => (
               <div key={idx} className="flex items-center gap-2 text-rose-400 bg-rose-500/10 p-2 rounded border border-rose-500/20">
                 <AlertTriangle className="w-4 h-4 shrink-0" />
@@ -206,13 +210,13 @@ export const AppModal: React.FC<AppModalProps> = ({
         <form onSubmit={handleSubmit} noValidate className="p-4 sm:p-5 space-y-3.5 text-xs">
           {/* App Name */}
           <div className="space-y-1">
-            <label className="block text-slate-300 font-medium">Application Name *</label>
+            <label className={`block ${styles.textSecondary} font-medium`}>Application Name *</label>
             <input
               type="text"
               value={formData.name || ''}
               onChange={(e) => handleFieldChange('name', e.target.value)}
               placeholder="App Name"
-              className={`w-full bg-slate-800 border rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-indigo-500 ${fieldErrors.name ? 'border-rose-500' : 'border-slate-700'}`}
+              className={`w-full ${styles.inputBg} border rounded-lg px-3 py-2 ${styles.inputText} focus:outline-none focus:border-indigo-500 ${fieldErrors.name ? 'border-rose-500' : styles.inputBorder}`}
             />
             {fieldErrors.name && <p className="text-rose-400 text-[11px] mt-1">Invalid {fieldErrors.name.toLowerCase()}</p>}
           </div>
@@ -220,8 +224,8 @@ export const AppModal: React.FC<AppModalProps> = ({
           {/* Network Settings Grid */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <label className="block text-slate-300 font-medium flex items-center gap-1">
-                <Network className="w-3.5 h-3.5 text-slate-400" />
+              <label className={`block ${styles.textSecondary} font-medium flex items-center gap-1`}>
+                <Network className={`w-3.5 h-3.5 ${styles.textMuted}`} />
                 <span>Listen Host</span>
               </label>
               <input
@@ -229,14 +233,14 @@ export const AppModal: React.FC<AppModalProps> = ({
                 value={formData.listenHost ?? ''}
                 onChange={(e) => handleFieldChange('listenHost', e.target.value)}
                 placeholder="0.0.0.0"
-                className={`w-full bg-slate-800 border rounded-lg px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-indigo-500 ${fieldErrors.listenHost ? 'border-rose-500' : 'border-slate-700'}`}
+                className={`w-full ${styles.inputBg} border rounded-lg px-3 py-2 ${styles.inputText} font-mono focus:outline-none focus:border-indigo-500 ${fieldErrors.listenHost ? 'border-rose-500' : styles.inputBorder}`}
               />
               {fieldErrors.listenHost && <p className="text-rose-400 text-[11px] mt-1">{fieldErrors.listenHost}</p>}
             </div>
 
             <div className="space-y-1">
-              <label className="block text-slate-300 font-medium flex items-center gap-1">
-                <Network className="w-3.5 h-3.5 text-slate-400" />
+              <label className={`block ${styles.textSecondary} font-medium flex items-center gap-1`}>
+                <Network className={`w-3.5 h-3.5 ${styles.textMuted}`} />
                 <span>Listen Port *</span>
               </label>
               <input
@@ -244,7 +248,7 @@ export const AppModal: React.FC<AppModalProps> = ({
                 value={formData.listenPort}
                 onChange={(e) => handleFieldChange('listenPort', e.target.value === '' ? '' : Number(e.target.value))}
                 placeholder="8080"
-                className={`w-full bg-slate-800 border rounded-lg px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-indigo-500 ${fieldErrors.listenPort ? 'border-rose-500' : 'border-slate-700'}`}
+                className={`w-full ${styles.inputBg} border rounded-lg px-3 py-2 ${styles.inputText} font-mono focus:outline-none focus:border-indigo-500 ${fieldErrors.listenPort ? 'border-rose-500' : styles.inputBorder}`}
               />
               {fieldErrors.listenPort && <p className="text-rose-400 text-[11px] mt-1">{fieldErrors.listenPort}</p>}
             </div>
@@ -260,8 +264,8 @@ export const AppModal: React.FC<AppModalProps> = ({
 
           {/* Base Path */}
           <div className="space-y-1">
-            <label className="block text-slate-300 font-medium flex items-center gap-1">
-              <Globe className="w-3.5 h-3.5 text-slate-400" />
+            <label className={`block ${styles.textSecondary} font-medium flex items-center gap-1`}>
+              <Globe className={`w-3.5 h-3.5 ${styles.textMuted}`} />
               <span>Base Path *</span>
             </label>
             <input
@@ -269,7 +273,7 @@ export const AppModal: React.FC<AppModalProps> = ({
               value={formData.basePath ?? ''}
               onChange={(e) => handleFieldChange('basePath', e.target.value)}
               placeholder="/"
-              className={`w-full bg-slate-800 border rounded-lg px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-indigo-500 ${fieldErrors.basePath ? 'border-rose-500' : 'border-slate-700'}`}
+              className={`w-full ${styles.inputBg} border rounded-lg px-3 py-2 ${styles.inputText} font-mono focus:outline-none focus:border-indigo-500 ${fieldErrors.basePath ? 'border-rose-500' : styles.inputBorder}`}
             />
             {fieldErrors.basePath && <p className="text-rose-400 text-[11px] mt-1">{fieldErrors.basePath}</p>}
           </div>
@@ -282,20 +286,20 @@ export const AppModal: React.FC<AppModalProps> = ({
                 id="app-enabled"
                 checked={formData.enabled !== false}
                 onChange={(e) => setFormData({ ...formData, enabled: e.target.checked })}
-                className="rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-800"
+                className={`rounded ${styles.inputBorder} text-indigo-600 focus:ring-indigo-500 ${styles.inputBg}`}
               />
-              <label htmlFor="app-enabled" className="text-slate-300 font-medium cursor-pointer">
+              <label htmlFor="app-enabled" className={`${styles.textSecondary} font-medium cursor-pointer`}>
                 Enable Application
               </label>
             </div>
           )}
 
           {/* Actions */}
-          <div className="pt-3 border-t border-slate-800 flex items-center justify-end space-x-3">
+          <div className={`pt-3 border-t ${styles.borderSubtle} flex items-center justify-end space-x-3`}>
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-slate-400 hover:text-slate-200 transition-colors"
+              className={`px-4 py-2 ${styles.textMuted} hover:text-indigo-400 transition-colors`}
             >
               Cancel
             </button>

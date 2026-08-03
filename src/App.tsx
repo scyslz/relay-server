@@ -400,6 +400,7 @@ export default function App() {
         apps={apps}
         selectedAppId={selectedAppId}
         onSaveRoute={handleSaveRoute}
+        theme={theme}
       />
 
       <AppModal
@@ -407,6 +408,7 @@ export default function App() {
         onClose={() => setIsAppModalOpen(false)}
         app={editingApp}
         onSaveApp={handleSaveApp}
+        theme={theme}
       />
 
       <TestSimulatorModal
@@ -415,6 +417,7 @@ export default function App() {
         apps={apps}
         routes={routes}
         initialRoute={testRouteTarget}
+        theme={theme}
       />
 
       <ConfirmModal
@@ -425,6 +428,7 @@ export default function App() {
         type={confirmState.type}
         onClose={() => setConfirmState(prev => ({ ...prev, isOpen: false }))}
         onConfirm={confirmState.onConfirm}
+        theme={theme}
       />
     </div>
   );

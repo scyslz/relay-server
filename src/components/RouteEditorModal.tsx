@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, CheckCircle2, AlertTriangle, Sparkles, Shield, Code, Save } from 'lucide-react';
-import { Route, AppConfig, MatchStrategy, HttpMethod, ValidationResult } from '../types';
+import { Route, AppConfig, MatchStrategy, HttpMethod, ValidationResult, ThemeMode } from '../types';
+import { THEME_STYLES } from '../theme';
 import { CODE_SNIPPETS } from '../data/defaultData';
 import { CustomSelect } from './CustomSelect';
 import { CodeEditor } from './CodeEditor';
@@ -12,6 +13,7 @@ interface RouteEditorModalProps {
   apps: AppConfig[];
   selectedAppId: string | null;
   onSaveRoute: (routeData: Partial<Route>) => Promise<{ success: boolean; validation?: ValidationResult; error?: string }>;
+  theme?: ThemeMode;
 }
 
 export const RouteEditorModal: React.FC<RouteEditorModalProps> = ({
@@ -20,8 +22,10 @@ export const RouteEditorModal: React.FC<RouteEditorModalProps> = ({
   route,
   apps,
   selectedAppId,
-  onSaveRoute
+  onSaveRoute,
+  theme = 'dark'
 }) => {
+  const styles = THEME_STYLES[theme];
   const [formData, setFormData] = useState<Partial<Route>>({
     name: '',
     appId: selectedAppId || apps[0]?.id || '',
@@ -160,17 +164,17 @@ response.status(200).json({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-xl sm:rounded-2xl w-full max-w-5xl lg:max-w-6xl shadow-2xl overflow-hidden flex flex-col h-[92vh] max-h-[850px]">
+    <div className={`fixed inset-0 z-50 flex items-center justify-center ${styles.overlayBg} backdrop-blur-sm p-2 sm:p-4 overflow-y-auto`}>
+      <div className={`${styles.modalBg} border ${styles.modalBorder} rounded-xl sm:rounded-2xl w-full max-w-5xl lg:max-w-6xl shadow-2xl overflow-hidden flex flex-col h-[92vh] max-h-[850px]`}>
         
         {/* Header with Direct Route Name Editing */}
-        <div className="px-3 py-2.5 sm:px-5 sm:py-3 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 gap-2 shrink-0">
+        <div className={`px-3 py-2.5 sm:px-5 sm:py-3 border-b ${styles.borderSubtle} flex items-center justify-between ${styles.modalBg} gap-2 shrink-0`}>
           <div className="flex items-center space-x-2.5 flex-1 min-w-0">
             <div className="p-1.5 sm:p-2 bg-indigo-600/20 text-indigo-400 rounded-lg border border-indigo-500/30 shrink-0">
               <Code className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div className="flex-1 min-w-0">
-              <label className="text-[10px] text-slate-400 font-medium block uppercase tracking-wider">
+              <label className={`text-[10px] ${styles.textMuted} font-medium block uppercase tracking-wider`}>
                 Route Name
               </label>
               <input
@@ -179,7 +183,7 @@ response.status(200).json({
                 value={formData.name || ''}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="Route Name"
-                className="w-full bg-slate-800/90 border border-slate-700/80 rounded-md px-2.5 py-1 text-xs sm:text-sm font-semibold text-slate-100 focus:outline-none focus:border-indigo-500"
+                className={`w-full ${styles.inputBg} border ${styles.inputBorder} rounded-md px-2.5 py-1 text-xs sm:text-sm font-semibold ${styles.inputText} focus:outline-none focus:border-indigo-500`}
               />
             </div>
 
@@ -193,7 +197,7 @@ response.status(200).json({
 
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors shrink-0"
+            className={`p-1.5 ${styles.textMuted} hover:text-indigo-400 hover:bg-indigo-500/10 rounded-lg transition-colors shrink-0`}
           >
             <X className="w-5 h-5" />
           </button>
@@ -203,11 +207,11 @@ response.status(200).json({
         <form onSubmit={handleSubmit} className="flex-1 flex flex-col min-h-0 overflow-hidden">
           
           {/* Streamlined Config Controls */}
-          <div className="p-3 bg-slate-950/70 border-b border-slate-800 space-y-2.5 shrink-0 text-xs">
+          <div className={`p-3 ${styles.panelBg} border-b ${styles.borderSubtle} space-y-2.5 shrink-0 text-xs`}>
             {/* Row 1: Strategy, Path & App */}
             <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
               <div className="sm:col-span-7 space-y-1">
-                <label className="text-slate-300 font-medium text-[11px] block">
+                <label className={`${styles.textSecondary} font-medium text-[11px] block`}>
                   <span>Match Path *</span>
                 </label>
                 <div className="flex items-center space-x-1.5">
@@ -222,6 +226,7 @@ response.status(200).json({
                       { value: 'regex', label: 'RegExp' }
                     ]}
                     buttonClassName="min-w-[90px]"
+                    theme={theme}
                   />
 
                   <input
@@ -230,14 +235,14 @@ response.status(200).json({
                     value={formData.pathPattern || ''}
                     onChange={(e) => setFormData({ ...formData, pathPattern: e.target.value })}
                     placeholder="/path"
-                    className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 font-mono text-xs focus:outline-none focus:border-indigo-500"
+                    className={`flex-1 ${styles.inputBg} border ${styles.inputBorder} rounded-lg px-2.5 py-1.5 ${styles.inputText} font-mono text-xs focus:outline-none focus:border-indigo-500`}
                   />
                 </div>
               </div>
 
               {/* Custom Target App Dropdown */}
               <div className="sm:col-span-5 space-y-1">
-                <label className="text-slate-300 font-medium text-[11px]">Target App *</label>
+                <label className={`${styles.textSecondary} font-medium text-[11px]`}>Target App *</label>
                 <CustomSelect
                   value={formData.appId || ''}
                   onChange={(val) => setFormData({ ...formData, appId: val })}
@@ -247,6 +252,7 @@ response.status(200).json({
                     subtitle: a.basePath
                   }))}
                   className="w-full"
+                  theme={theme}
                 />
               </div>
             </div>
@@ -254,7 +260,7 @@ response.status(200).json({
             {/* Row 2: HTTP Methods & Code Snippets */}
             <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
               <div className="flex items-center space-x-1.5">
-                <span className="text-slate-400 text-[11px] font-medium mr-1">Methods:</span>
+                <span className={`${styles.textMuted} text-[11px] font-medium mr-1`}>Methods:</span>
                 {(['ALL', 'GET', 'POST', 'PUT', 'DELETE'] as HttpMethod[]).map(m => {
                   const isSelected = (formData.httpMethods || []).includes(m);
                   return (
@@ -265,7 +271,7 @@ response.status(200).json({
                       className={`px-2 py-0.5 rounded text-[11px] font-mono font-bold transition-all border ${
                         isSelected
                           ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
-                          : 'bg-slate-800/80 text-slate-400 border-slate-700 hover:text-slate-200'
+                          : `${styles.inputBg} ${styles.textMuted} border ${styles.inputBorder} hover:text-indigo-400`
                       }`}
                     >
                       {m}
@@ -289,6 +295,7 @@ response.status(200).json({
                     label: snip.title
                   }))}
                   buttonClassName="text-amber-300 border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 min-w-[110px]"
+                  theme={theme}
                 />
               </div>
             </div>
@@ -296,7 +303,7 @@ response.status(200).json({
 
           {/* Validation Banner */}
           {validationResult && (
-            <div className="px-3 py-1.5 bg-slate-950 border-b border-slate-800 text-xs space-y-1 shrink-0">
+            <div className={`px-3 py-1.5 ${styles.panelBg} border-b ${styles.borderSubtle} text-xs space-y-1 shrink-0`}>
               {validationResult.errors.map((err, idx) => (
                 <div key={idx} className="flex items-center gap-2 text-rose-400 bg-rose-500/10 p-1.5 rounded border border-rose-500/20">
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
@@ -330,15 +337,16 @@ response.status(200).json({
             <CodeEditor
               value={formData.code || ''}
               onChange={(val) => setFormData({ ...formData, code: val })}
+              theme={theme}
             />
           </div>
 
           {/* Footer Actions */}
-          <div className="px-3 py-2.5 sm:px-5 sm:py-3 bg-slate-900 border-t border-slate-800 flex items-center justify-between shrink-0">
+          <div className={`px-3 py-2.5 sm:px-5 sm:py-3 ${styles.modalBg} border-t ${styles.borderSubtle} flex items-center justify-between shrink-0`}>
             <button
               type="button"
               onClick={handleValidate}
-              className="px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-indigo-300 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-colors"
+              className={`px-3 py-1.5 text-xs font-medium ${styles.buttonSecondary} text-indigo-300 rounded-lg border flex items-center gap-1.5 transition-colors`}
             >
               <Shield className="w-3.5 h-3.5 text-indigo-400" />
               <span>Validate</span>
@@ -355,7 +363,7 @@ response.status(200).json({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-3.5 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 transition-colors"
+                className={`px-3.5 py-1.5 text-xs font-medium ${styles.textMuted} hover:text-indigo-400 transition-colors`}
               >
                 Cancel
               </button>
@@ -366,7 +374,7 @@ response.status(200).json({
                 title={isBuiltIn ? 'Built-in routes cannot be saved' : 'Save Route'}
                 className={`px-4 py-1.5 text-xs font-medium rounded-lg shadow-sm flex items-center gap-1.5 transition-all ${
                   isBuiltIn
-                    ? 'bg-slate-800 text-slate-500 border border-slate-700/80 cursor-not-allowed'
+                    ? `${styles.inputBg} ${styles.textMuted} border ${styles.inputBorder} cursor-not-allowed`
                     : 'bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white'
                 }`}
               >
