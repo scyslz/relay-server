@@ -27,13 +27,21 @@ WORKDIR /app
 COPY --from=build /app/dist ./dist
 COPY --from=deps /deps/node_modules ./node_modules
 
-# Writable dir for config + log persistence, run as non-root.
-RUN mkdir -p data && addgroup -S relay && adduser -S -G relay relay && chown -R relay:relay /app
-USER relay
+# Non-root runtime user + su-exec, so the entrypoint can prepare /app/data
+# (mkdir + chown even when it's a host bind mount owned by another UID) and
+# then drop privileges back to the relay user.
+RUN addgroup -S relay && adduser -S -G relay relay \
+    && chown -R relay:relay /app \
+    && apk add --no-cache su-exec
+
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Fresh containers (no data mount) bind 0.0.0.0:3000 by default
-# (DEFAULT_SERVER_CONFIG). Mount your own config to override the port.
+# (DEFAULT_SERVER_CONFIG). Override via RELAY_PORT/PORT env or a mounted
+# config file.
 
 VOLUME ["/app/data"]
 
-CMD ["dist/server.cjs"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["/usr/local/bin/bun", "dist/server.cjs"]

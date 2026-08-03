@@ -36,33 +36,39 @@ A prebuilt multi-arch image (amd64 + arm64) is published to
 `ghcr.io/scyslz/relay-server` by CI. Run it with Docker Compose:
 
 ```bash
-cp config.json.example config.json   # only needed once, to preload sample apps/routes
 docker compose up -d
 ```
 
 - Admin console / system server: `http://localhost:3000`
 - Example app: `http://localhost:8081`
+  (both are `$RELAY_PORT`-configurable, default `3000`)
 
-Your local `config.json` is mounted into `/app/data/relay-config.json` and
-written back on every change made in the UI. It is git-ignored, so updating
-the repo never overwrites your running configuration. Execution logs persist
-in the `relay_logs` volume. Remove the config mount to start empty and
-configure everything from the UI.
+The compose file mounts the `./data` **directory** (not a single file). On
+first start the server auto-creates `data/relay-config.json` and
+`data/relay-logs.json` and keeps writing them back on every change made in the
+UI, so your configuration survives container recreation and repo updates.
+`config.json.example` shows the config schema if you want to preload one.
+
+Change the system server port on a fresh setup via an env var (used when no
+config file exists yet; once `data/relay-config.json` exists, its
+`server.listenPort` wins):
+
+```bash
+RELAY_PORT=5000 docker compose up -d
+```
+
+> **Permissions:** the entrypoint takes ownership of `/app/data` (the container
+> runs the server as the non-root `relay` user, uid 100) so config/logs can be
+> written automatically. If you also run the server directly on the host
+> against the same `./data` dir, adjust ownership with
+> `sudo chown -R $(id -u):$(id -g) data`.
 
 Build the image yourself:
 
 ```bash
 docker build -t relay-server:local .
-docker compose up -d   # or: docker run -p 3000:3000 -p 8081:8081 relay-server:local
+docker run -p 3000:3000 -p 8081:8081 relay-server:local
 ```
-
-Adjust the ports in `docker-compose.yml` to match the `listenPort` values in
-your `config.json` (or `config.json.example`) for the system server and each app.
-
-> **Note:** the container runs as a non-root user, so it can only write changes
-> back to a host-mounted `config.json` if that file is writable by the
-> container's UID. If the UI stops persisting edits, make it writable:
-> `chmod 666 config.json` (or `chown` it to the container's `relay` UID).
 
 ## Scripts
 

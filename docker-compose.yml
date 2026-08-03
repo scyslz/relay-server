@@ -5,17 +5,16 @@ services:
     image: ghcr.io/scyslz/relay-server:latest
     container_name: relay-server
     restart: unless-stopped
-    volumes:
-      # Optional: preload apps/routes from a local config file. config.json is
-      # your own untracked file (create it once: cp config.json.example config.json),
-      # so repo updates never overwrite your running configuration. The server
-      # also writes config changes made in the UI back to this file.
-      # Remove this line to start fresh and configure everything from the UI.
-      - ./config.json:/app/data/relay-config.json
-      # Writable storage for execution logs (survives container recreation).
-      - relay_logs:/app/data
     environment:
       - TZ=UTC
+      # System server port when starting with no config file. If a config file
+      # exists (./data/relay-config.json), its server.listenPort wins instead.
+      - PORT=${RELAY_PORT:-3000}
+    ports:
+      - "${RELAY_PORT:-3000}:${RELAY_PORT:-3000}"
+    volumes:
+      # Directory mount (not a single file): relay-config.json and
+      # relay-logs.json are auto-created on first start and persisted here.
+      # The entrypoint chowns this dir so the non-root server can write it.
+      - ./data:/app/data
 
-volumes:
-  relay_logs:

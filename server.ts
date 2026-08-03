@@ -117,9 +117,24 @@ function saveConfigToDisk() {
   }
 }
 
+// Env-based defaults for the system listener, used when no config file exists
+// (e.g. fresh containers): RELAY_PORT (or PORT) overrides the listen port,
+// LISTEN_HOST overrides the bind address. A persisted config file still wins.
+function envServerConfigDefaults(): Partial<ServerConfig> {
+  const overrides: Partial<ServerConfig> = {};
+  const port = Number(process.env.RELAY_PORT ?? process.env.PORT);
+  if (Number.isInteger(port) && port > 0 && port <= 65535) {
+    overrides.listenPort = port;
+  }
+  if (typeof process.env.LISTEN_HOST === 'string' && process.env.LISTEN_HOST.trim()) {
+    overrides.listenHost = process.env.LISTEN_HOST.trim();
+  }
+  return overrides;
+}
+
 // Helper: Load config from JSON disk file
 function loadConfigFromDisk() {
-  serverConfig = { ...DEFAULT_SERVER_CONFIG };
+  serverConfig = { ...DEFAULT_SERVER_CONFIG, ...envServerConfigDefaults() };
   try {
     if (fs.existsSync(CONFIG_FILE_PATH)) {
       const raw = fs.readFileSync(CONFIG_FILE_PATH, 'utf-8');
