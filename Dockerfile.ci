@@ -1,0 +1,35 @@
+# syntax=docker/dockerfile:1
+# CI multi-arch build: `dist/` is injected via the named "dist" build context
+# (already compiled natively on the runner). No esbuild/vite runs under QEMU,
+# avoiding the esbuild "service was stopped: write EPIPE" crash on emulated archs.
+# The dist artifacts (vite static UI + server.cjs bundle) are pure JS and
+# arch-independent; only the Bun runtime comes from the per-arch base image.
+
+# ---------- Stage 1: Runtime deps ----------
+# express + its deps are pure JS, so npm install is safe even under QEMU.
+FROM node:20-alpine AS deps
+WORKDIR /deps
+RUN npm init -y >/dev/null \
+    && npm install --omit=dev --omit=optional --no-audit --no-fund express@4.21.2 \
+    && npm cache clean --force
+
+# ---------- Stage 2: Runtime (Bun, ~43MB base) ----------
+FROM oven/bun:1-alpine AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+
+# "dist" is a build context defined by docker/build-push-action (build-contexts).
+COPY --from=dist / ./dist
+COPY --from=deps /deps/node_modules ./node_modules
+
+# Writable dir for config + log persistence, run as non-root.
+RUN mkdir -p data && addgroup -S relay && adduser -S -G relay relay && chown -R relay:relay /app
+USER relay
+
+# Fresh containers (no data mount) bind 0.0.0.0:3000 by default
+# (DEFAULT_SERVER_CONFIG). Mount your own config to override the port.
+EXPOSE 3000 3100
+
+VOLUME ["/app/data"]
+
+CMD ["dist/server.cjs"]

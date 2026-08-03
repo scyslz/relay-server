@@ -1,0 +1,6 @@
+{
+  "name": "Relay Server & Route Hub",
+  "description": "Dynamic Relay Server and Management Console with JavaScript Scriptable Routes, Validation & Isolation",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
