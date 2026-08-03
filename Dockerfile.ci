@@ -28,7 +28,6 @@ USER relay
 
 # Fresh containers (no data mount) bind 0.0.0.0:3000 by default
 # (DEFAULT_SERVER_CONFIG). Mount your own config to override the port.
-EXPOSE 3000 3100
 
 VOLUME ["/app/data"]
 
