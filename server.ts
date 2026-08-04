@@ -2006,10 +2006,29 @@ function collectRouteImportNames(): Set<string> {
   return names;
 }
 
+// Read a package's declared dependencies, looking in both the auto-install dir
+// and the program's bundled node_modules (resolveBundledImport skips
+// data/route-modules). Returns the union if found in either.
+function readDependencyNames(name: string): string[] {
+  const seen = new Set<string>();
+  const candidates: string[] = [
+    path.join(ROUTE_MODULES_DIR, 'node_modules', ...name.split('/'), 'package.json'),
+  ];
+  const bundled = resolveBundledImport(name);
+  if (bundled) candidates.push(path.join(bundled, 'package.json'));
+  for (const f of candidates) {
+    try {
+      const deps = JSON.parse(fs.readFileSync(f, 'utf-8')).dependencies || {};
+      for (const d of Object.keys(deps)) seen.add(d);
+    } catch { /* not present here */ }
+  }
+  return Array.from(seen);
+}
+
 // Expand a set of package names to their transitive dependencies, reading each
-// installed package's package.json in data/route-modules/node_modules.
+// installed package's package.json from the auto-install dir or the program's
+// bundled node_modules.
 function dependencyClosureOf(names: Iterable<string>): Set<string> {
-  const nmDir = path.join(ROUTE_MODULES_DIR, 'node_modules');
   const closure = new Set<string>();
   const queue: string[] = [];
   for (const n of names) {
@@ -2020,11 +2039,7 @@ function dependencyClosureOf(names: Iterable<string>): Set<string> {
   }
   while (queue.length) {
     const name = queue.shift() as string;
-    let deps: Record<string, string> = {};
-    try {
-      deps = JSON.parse(fs.readFileSync(path.join(nmDir, ...name.split('/'), 'package.json'), 'utf-8')).dependencies || {};
-    } catch { continue; }
-    for (const dep of Object.keys(deps)) {
+    for (const dep of readDependencyNames(name)) {
       if (!closure.has(dep)) {
         closure.add(dep);
         queue.push(dep);
