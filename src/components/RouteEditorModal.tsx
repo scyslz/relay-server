@@ -292,7 +292,7 @@ response.status(200).json({
                       ? 'bg-amber-600 text-white border-amber-500 shadow-sm'
                       : `${styles.inputBg} ${styles.textMuted} border ${styles.inputBorder} hover:text-amber-400`
                   }`}
-                  title="Skip TLS/SSL certificate verification for this route's outgoing HTTPS requests"
+                  title="Skip TLS/SSL certificate verification for this route's outgoing fetch() HTTPS requests"
                 >
                   <Shield className="w-3 h-3" />
                   {formData.ignoreTls ? 'Ignore TLS: ON' : 'Ignore TLS: OFF'}
