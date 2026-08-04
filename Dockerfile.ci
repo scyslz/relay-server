@@ -10,7 +10,7 @@
 FROM node:20-alpine AS deps
 WORKDIR /deps
 RUN npm init -y >/dev/null \
-    && npm install --omit=dev --omit=optional --no-audit --no-fund express@4.21.2 \
+    && npm install --omit=dev --omit=optional --no-audit --no-fund express@4.21.2 selfsigned@2.4.1 \
     && npm cache clean --force
 
 # ---------- Stage 2: Runtime (Bun, ~43MB base) ----------
