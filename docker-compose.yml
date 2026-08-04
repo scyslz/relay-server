@@ -10,6 +10,10 @@ services:
       # System server port when starting with no config file. If a config file
       # exists (./data/relay-config.json), its server.listenPort wins instead.
       - PORT=${RELAY_PORT:-3000}
+      # OPT-IN global skip of outbound HTTPS cert verification for route scripts
+      # (fetch/https/axios). Off by default; enable only if needed:
+      #   RELAY_TLS_INSECURE=true
+      - RELAY_TLS_INSECURE=${RELAY_TLS_INSECURE:-false}
     ports:
       - "${RELAY_PORT:-3000}:${RELAY_PORT:-3000}"
     volumes:

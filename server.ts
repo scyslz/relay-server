@@ -54,6 +54,15 @@ const execFileAsync = promisify(execFile);
 // to disable runtime installs and surface resolution errors instead.
 const AUTO_INSTALL_ENABLED = process.env.RELAY_AUTO_INSTALL !== 'false';
 
+// Opt-in global skip of TLS certificate verification for outbound HTTPS made by
+// route scripts (fetch, https, axios). Bun cannot restore this setting after it
+// is flipped at runtime, so it is only applied at startup, and only when the
+// operator explicitly sets RELAY_TLS_INSECURE=true (default: verification on).
+if (process.env.RELAY_TLS_INSECURE === 'true') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  console.warn('[TLS] RELAY_TLS_INSECURE=true — outbound HTTPS certificate verification is DISABLED for route scripts.');
+}
+
 // Log retention & paging: keep at most MAX_LOG_ENTRIES records (newest-first)
 // in memory and on disk, and serve pages of at most DEFAULT_LOGS_LIMIT at a time
 // so large histories never slow the UI.
