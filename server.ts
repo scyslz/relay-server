@@ -2106,7 +2106,12 @@ async function warmRouteModules(): Promise<void> {
 }
 
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
+  // Vite dev middleware is an explicit opt-in (NODE_ENV=development AND a source
+  // checkout with vite.config.ts). Anything else — unset, "production", a bare
+  // container, or a stray value — serves the static dist build, so the dev
+  // server (and its ~300MB footprint) can never be booted accidentally.
+  const isDev = process.env.NODE_ENV === 'development' && fs.existsSync('vite.config.ts');
+  if (isDev) {
     // Lazy-import Vite (dev only) so the production image needs no Vite/esbuild.
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
@@ -2114,9 +2119,11 @@ async function startServer() {
       appType: 'spa',
     });
     app.use(vite.middlewares);
+    console.warn('[Mode] Vite dev middleware enabled (NODE_ENV=development)');
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
+    console.log(`[Mode] Production static serving from ${distPath} (NODE_ENV=${process.env.NODE_ENV || '(unset)'})`);
 
     // Unified unmatched-request handler: browsers navigating get the SPA,
     // API clients get a JSON 404.

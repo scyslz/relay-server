@@ -7,6 +7,9 @@ services:
     restart: unless-stopped
     environment:
       - TZ=UTC
+      # Explicit production mode: the Vite dev server (300MB+) is only ever
+      # started when NODE_ENV=development, so keep this set for deployments.
+      - NODE_ENV=production
       # System server port when starting with no config file. If a config file
       # exists (./data/relay-config.json), its server.listenPort wins instead.
       - PORT=${RELAY_PORT:-3000}
