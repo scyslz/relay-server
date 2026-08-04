@@ -1119,43 +1119,50 @@ function transformRouteToModule(code: string): string {
 // module that is still executing. Only the documented params are injected
 // (request, response, fetch, console, fs); anything else (https, http, npm
 // packages) must be imported explicitly by the script.
-async function executeRouteModule(
-  route: Route,
-  sandbox: Record<string, any>
-): Promise<void> {
+// Resolve (and import) the cached module for a route, re-importing only when the
+// code changed. Also used at startup to pre-import every enabled route so missing
+// packages / syntax errors surface before the first request.
+async function loadRouteModule(route: Route): Promise<RouteModuleEntry> {
   const hash = createHash('sha1').update(route.code).digest('hex').slice(0, 12);
   const cacheKey = `${route.id}:${hash}`;
   const file = path.join(ROUTE_SCRIPTS_DIR, routeModuleFileName(route.id, hash));
 
   let entry = routeModuleCache.get(cacheKey);
-  if (!entry) {
-    // Install any missing top-level npm packages BEFORE the first import so bun
-    // never records a negative resolution (which would poison all later imports).
-    await ensureBareImportsInstalled(route.code);
-    fs.mkdirSync(ROUTE_SCRIPTS_DIR, { recursive: true });
-    if (!fs.existsSync(file)) {
-      fs.writeFileSync(file, transformRouteToModule(route.code), 'utf-8');
-    }
-    try {
+  if (entry) return entry;
+
+  // Install any missing top-level npm packages BEFORE the first import so bun
+  // never records a negative resolution (which would poison all later imports).
+  await ensureBareImportsInstalled(route.code);
+  fs.mkdirSync(ROUTE_SCRIPTS_DIR, { recursive: true });
+  if (!fs.existsSync(file)) {
+    fs.writeFileSync(file, transformRouteToModule(route.code), 'utf-8');
+  }
+  try {
+    const module = await import(pathToFileURL(file).href);
+    entry = { hash, file, module, refs: 0, lastUsed: Date.now(), created: Date.now() };
+  } catch (scriptErr: any) {
+    const missing = missingPackageFromError(scriptErr);
+    if (missing && AUTO_INSTALL_ENABLED) {
+      // Defensive fallback: pre-install above covers top-level imports, so this
+      // only fires for transitive deps. Best effort — bun's in-process resolver
+      // cache may keep a negative hit, but retrying is cheap.
+      await installPackage(missing);
       const module = await import(pathToFileURL(file).href);
       entry = { hash, file, module, refs: 0, lastUsed: Date.now(), created: Date.now() };
-    } catch (scriptErr: any) {
-      const missing = missingPackageFromError(scriptErr);
-      if (missing && AUTO_INSTALL_ENABLED) {
-        // Defensive fallback: pre-install above covers top-level imports, so this
-        // only fires for transitive deps. Best effort — bun's in-process resolver
-        // cache may keep a negative hit, but retrying is cheap.
-        await installPackage(missing);
-        const module = await import(pathToFileURL(file).href);
-        entry = { hash, file, module, refs: 0, lastUsed: Date.now(), created: Date.now() };
-      } else {
-        throw scriptErr;
-      }
+    } else {
+      throw scriptErr;
     }
-    routeModuleCache.set(cacheKey, entry);
-    cleanupRouteModuleCache();
   }
+  routeModuleCache.set(cacheKey, entry);
+  cleanupRouteModuleCache();
+  return entry;
+}
 
+async function executeRouteModule(
+  route: Route,
+  sandbox: Record<string, any>
+): Promise<void> {
+  const entry = await loadRouteModule(route);
   entry.refs++;
   entry.lastUsed = Date.now();
   try {
@@ -1987,6 +1994,102 @@ function cleanOrphanRouteScripts(): void {
   } catch { /* dir may not exist yet */ }
 }
 
+// Names of every npm package imported by the enabled routes (the set we must
+// keep around, together with their transitive dependencies).
+function collectRouteImportNames(): Set<string> {
+  const names = new Set<string>();
+  for (const route of routesStore) {
+    if (!route.enabled) continue;
+    if (!route.code) continue;
+    for (const { name } of extractBareImports(route.code)) names.add(name);
+  }
+  return names;
+}
+
+// Expand a set of package names to their transitive dependencies, reading each
+// installed package's package.json in data/route-modules/node_modules.
+function dependencyClosureOf(names: Iterable<string>): Set<string> {
+  const nmDir = path.join(ROUTE_MODULES_DIR, 'node_modules');
+  const closure = new Set<string>();
+  const queue: string[] = [];
+  for (const n of names) {
+    if (!closure.has(n)) {
+      closure.add(n);
+      queue.push(n);
+    }
+  }
+  while (queue.length) {
+    const name = queue.shift() as string;
+    let deps: Record<string, string> = {};
+    try {
+      deps = JSON.parse(fs.readFileSync(path.join(nmDir, ...name.split('/'), 'package.json'), 'utf-8')).dependencies || {};
+    } catch { continue; }
+    for (const dep of Object.keys(deps)) {
+      if (!closure.has(dep)) {
+        closure.add(dep);
+        queue.push(dep);
+      }
+    }
+  }
+  return closure;
+}
+
+// Remove auto-installed packages in data/route-modules/node_modules that no
+// enabled route imports (nor any of their transitive deps). Keeps the disk from
+// accumulating stale installs after routes are edited or deleted.
+function cleanUnusedRouteModules(): void {
+  const nmDir = path.join(ROUTE_MODULES_DIR, 'node_modules');
+  let entries: string[] = [];
+  try {
+    entries = fs.readdirSync(nmDir);
+  } catch { return; }
+  const needed = dependencyClosureOf(collectRouteImportNames());
+  let removed = 0;
+  const isUnused = (full: string): boolean =>
+    fs.existsSync(path.join(full, 'package.json')) && !needed.has(path.basename(full));
+  for (const entry of entries) {
+    if (entry.startsWith('.')) continue; // .bin, .package-lock.json, ...
+    const full = path.join(nmDir, entry);
+    if (entry.startsWith('@')) {
+      // Scoped namespace: remove only the member packages, not the @scope dir.
+      let scopeDirs: string[] = [];
+      try { scopeDirs = fs.readdirSync(full); } catch { continue; }
+      let empty = true;
+      for (const sub of scopeDirs) {
+        const subFull = path.join(full, sub);
+        if (isUnused(subFull)) {
+          fs.rmSync(subFull, { recursive: true, force: true });
+          removed++;
+        } else if (fs.existsSync(subFull)) {
+          empty = false;
+        }
+      }
+      if (empty) fs.rmSync(full, { recursive: true, force: true });
+    } else if (isUnused(full)) {
+      fs.rmSync(full, { recursive: true, force: true });
+      removed++;
+    }
+  }
+  if (removed > 0) console.log(`[Route Modules] Cleaned ${removed} unused package(s)`);
+}
+
+// Startup import: pre-install dependencies and pre-import the module for every
+// enabled route, so missing packages, install failures and syntax errors surface
+// at boot instead of on the first request.
+async function warmRouteModules(): Promise<void> {
+  const routes = routesStore.filter((r) => r.enabled && r.code);
+  let ok = 0;
+  for (const route of routes) {
+    try {
+      await loadRouteModule(route);
+      ok++;
+    } catch (err: any) {
+      console.error(`[Startup] Route "${route.name}" (${route.id}) failed to load: ${err.message}`);
+    }
+  }
+  console.log(`[Startup] Pre-imported ${ok}/${routes.length} route module(s)`);
+}
+
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     // Lazy-import Vite (dev only) so the production image needs no Vite/esbuild.
@@ -2032,8 +2135,19 @@ async function startServer() {
   });
 
   // Periodically evict idle/unused cached route modules and their on-disk files.
-  setInterval(() => cleanupRouteModuleCache(), ROUTE_MODULE_CLEAN_INTERVAL_MS);
+  setInterval(() => {
+    cleanupRouteModuleCache();
+    try { cleanUnusedRouteModules(); } catch (err) { console.error('[Route Modules] Cleanup error:', err); }
+  }, ROUTE_MODULE_CLEAN_INTERVAL_MS);
   cleanOrphanRouteScripts();
+
+  // Startup import: pre-install + pre-import every enabled route's dependencies,
+  // then drop any auto-installed packages no enabled route references anymore.
+  warmRouteModules()
+    .finally(() => {
+      try { cleanUnusedRouteModules(); } catch (err) { console.error('[Route Modules] Cleanup error:', err); }
+    })
+    .catch((err) => console.error('[Startup] Warm-up failed:', err));
 
   rebindAllAppListeners();
 }
