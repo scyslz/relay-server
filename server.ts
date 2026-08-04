@@ -1,8 +1,15 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
+import http from 'http';
+import https from 'https';
+import { generate as generateSelfSignedCert } from 'selfsigned';
+import { execFile, execFileSync } from 'child_process';
+import { promisify } from 'util';
+import { createHash } from 'crypto';
+import { pathToFileURL } from 'url';
 import { Server as HttpServer } from 'http';
-import { createServer as createNetServer, isIP as netIsIP } from 'net';
+import { createServer as createNetServer, createConnection as netCreateConnection, isIP as netIsIP, Server as NetServer, Socket as NetSocket } from 'net';
 import { AppConfig, ServerConfig, Route, ExecutionLog, ValidationIssue, ValidationResult, TestRequestPayload, TestResponsePayload } from './src/types';
 import { INITIAL_PRESET_APPS, INITIAL_PRESET_ROUTES } from './src/data/defaultData';
 import { SYSTEM_APP, SYSTEM_APP_ID, SYSTEM_ROUTES, DEFAULT_SERVER_CONFIG } from './src/constants';
@@ -16,12 +23,36 @@ let serverConfig: ServerConfig = { ...DEFAULT_SERVER_CONFIG };
 // Currently bound HTTP listener (hot-swapped when the system server config changes).
 let httpServer: HttpServer | null = null;
 
+// Preconfigured HTTPS agent that skips TLS certificate validation. Used ONLY
+// when a route opts in via its `ignoreTls` flag (never injected globally).
+const insecureAgent = new https.Agent({ rejectUnauthorized: false, keepAlive: true });
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // In-Memory Storage & Configuration Persistence
 const CONFIG_FILE_PATH = path.join(process.cwd(), 'data', 'relay-config.json');
 const LOG_FILE_PATH = path.join(process.cwd(), 'data', 'relay-logs.json');
+
+// Self-signed TLS material for HTTPS app listeners lives in a `crt` directory
+// next to the config file (data/crt). It is auto-generated on first use when
+// missing, and reused across restarts.
+const CRT_DIR = path.join(process.cwd(), 'data', 'crt');
+const CRT_KEY_PATH = path.join(CRT_DIR, 'key.pem');
+const CRT_CERT_PATH = path.join(CRT_DIR, 'cert.pem');
+
+// Auto-installed npm modules for route scripts live in data/route-modules
+// (persisted + writable). Scripts are executed as real .mjs files under
+// data/route-modules/scripts/, so their bare `import "pkg"` specifiers resolve
+// against the auto-installed node_modules (and Node/Bun builtins).
+const ROUTE_MODULES_DIR = path.join(process.cwd(), 'data', 'route-modules');
+const ROUTE_SCRIPTS_DIR = path.join(ROUTE_MODULES_DIR, 'scripts');
+
+const execFileAsync = promisify(execFile);
+
+// Auto-install missing npm packages by default; set RELAY_AUTO_INSTALL=false
+// to disable runtime installs and surface resolution errors instead.
+const AUTO_INSTALL_ENABLED = process.env.RELAY_AUTO_INSTALL !== 'false';
 
 // Log retention & paging: keep at most MAX_LOG_ENTRIES records (newest-first)
 // in memory and on disk, and serve pages of at most DEFAULT_LOGS_LIMIT at a time
@@ -304,7 +335,7 @@ async function reListenServer(prevConfig: ServerConfig): Promise<boolean> {
 // ONLY to that App's routes using the direct path (the port
 // identifies the App, so no /relay prefix is required).
 // ----------------------------------------------------
-const appListeners = new Map<string, HttpServer>();
+const appListeners = new Map<string, NetServer>();
 
 // Match a request path against an App's enabled routes.
 // Candidate path forms: the raw path plus the basePath-stripped path.
@@ -456,9 +487,91 @@ function createAppSubApp(appId: string) {
 
 // Per-app listener bind status, surfaced in the UI so "active but port failed"
 // states are visually distinguishable from truly-listening apps.
-const appListenStatus = new Map<string, { bound: boolean; address?: string; error?: string; reason?: string }>();
+const appListenStatus = new Map<string, { bound: boolean; address?: string; scheme?: string; error?: string; reason?: string }>();
 
-function bindAppListener(appConfig: AppConfig) {
+// Load (and generate on first use) the self-signed TLS key/cert pair used by
+// HTTPS app listeners. Generated once into data/crt next to the config file;
+// regenerated automatically only if the files are missing.
+function ensureSelfSignedCerts(): { key: string; cert: string } {
+  fs.mkdirSync(CRT_DIR, { recursive: true });
+  if (fs.existsSync(CRT_KEY_PATH) && fs.existsSync(CRT_CERT_PATH)) {
+    return { key: fs.readFileSync(CRT_KEY_PATH, 'utf-8'), cert: fs.readFileSync(CRT_CERT_PATH, 'utf-8') };
+  }
+  console.log('[TLS] Generating self-signed certificate for HTTPS listeners...');
+  const pems = generateSelfSignedCert(
+    [
+      { name: 'commonName', value: 'relay.local' },
+      { name: 'organizationName', value: 'Relay Server' },
+      { name: 'organizationalUnitName', value: 'Self-Signed' }
+    ],
+    {
+      keySize: 2048,
+      algorithm: 'sha256',
+      days: 3650,
+      extensions: [
+        { name: 'basicConstraints', cA: true },
+        { name: 'keyUsage', keyCertSign: true, digitalSignature: true, keyEncipherment: true },
+        { name: 'extKeyUsage', serverAuth: true, clientAuth: true },
+        { name: 'subjectAltName', altNames: [
+          { type: 2, value: 'localhost' },
+          { type: 7, ip: '127.0.0.1' }
+        ] }
+      ]
+    }
+  );
+  fs.writeFileSync(CRT_KEY_PATH, pems.private, { mode: 0o600 });
+  fs.writeFileSync(CRT_CERT_PATH, pems.cert, 'utf-8');
+  console.log(`[TLS] Generated self-signed certificate at ${CRT_DIR}`);
+  return { key: pems.private, cert: pems.cert };
+}
+
+// Build a listener for an app based on its selected protocols. http and https
+// may both be enabled; when both are selected a single shared port serves the
+// two protocols by sniffing the first bytes of each connection (TLS ClientHello
+// vs plaintext) and tunneling it to an internal loopback http/https listener.
+// (Bun's http/https servers cannot receive sockets injected via 'connection'
+// events, so a plain loopback tunnel is used to keep one public port.)
+async function buildAppListener(appConfig: AppConfig, sub: any): Promise<{ server: NetServer; scheme: string }> {
+  const protocols = (appConfig.protocols && appConfig.protocols.length)
+    ? appConfig.protocols
+    : ['http' as const];
+  const useHttp = protocols.includes('http');
+  const useHttps = protocols.includes('https');
+
+  if (useHttp && useHttps) {
+    const { key, cert } = ensureSelfSignedCerts();
+    const httpSrv = http.createServer(sub);
+    const httpsSrv = https.createServer({ key, cert }, sub);
+    await new Promise<void>((resolve) => httpSrv.listen(0, '127.0.0.1', () => resolve()));
+    await new Promise<void>((resolve) => httpsSrv.listen(0, '127.0.0.1', () => resolve()));
+    const httpPort = (httpSrv.address() as any).port as number;
+    const httpsPort = (httpsSrv.address() as any).port as number;
+    const server = createNetServer((socket: NetSocket) => {
+      socket.once('data', (buffer: Buffer) => {
+        socket.pause();
+        const isTls = buffer.length >= 2 && buffer[0] === 0x16 && buffer[1] === 0x03;
+        const upstream = netCreateConnection({ port: isTls ? httpsPort : httpPort, host: '127.0.0.1' });
+        upstream.on('connect', () => {
+          upstream.write(buffer);
+          socket.pipe(upstream);
+          upstream.pipe(socket);
+        });
+        socket.on('error', () => upstream.destroy());
+        upstream.on('error', () => socket.destroy());
+      });
+    });
+    return { server, scheme: 'http+https' };
+  }
+
+  if (useHttps) {
+    const { key, cert } = ensureSelfSignedCerts();
+    return { server: https.createServer({ key, cert }, sub), scheme: 'https' };
+  }
+
+  return { server: http.createServer(sub), scheme: 'http' };
+}
+
+async function bindAppListener(appConfig: AppConfig) {
   unbindAppListener(appConfig.id);
 
   const isSystem = appConfig.isDefault || appConfig.id === SYSTEM_APP_ID;
@@ -481,12 +594,13 @@ function bindAppListener(appConfig: AppConfig) {
     return;
   }
 
-  const server = createAppSubApp(appConfig.id).listen(port, host, () => {
-    appListenStatus.set(appConfig.id, { bound: true, address: `${host}:${port}` });
-    console.log(`[App Listener] "${appConfig.name}" listening on http://${host}:${port}`);
+  const { server, scheme } = await buildAppListener(appConfig, createAppSubApp(appConfig.id));
+  server.listen(port, host, () => {
+    appListenStatus.set(appConfig.id, { bound: true, address: `${host}:${port}`, scheme });
+    console.log(`[App Listener] "${appConfig.name}" listening on ${scheme}://${host}:${port}`);
   });
   server.once('error', (err: any) => {
-    appListenStatus.set(appConfig.id, { bound: false, error: err.message, address: `${host}:${port}` });
+    appListenStatus.set(appConfig.id, { bound: false, error: err.message, address: `${host}:${port}`, scheme });
     console.error(`[App Listener] "${appConfig.name}" failed to bind ${host}:${port}: ${err.message}`);
   });
   appListeners.set(appConfig.id, server);
@@ -501,13 +615,13 @@ function unbindAppListener(appId: string) {
   appListenStatus.set(appId, { bound: false, reason: 'disabled' });
 }
 
-function rebindAllAppListeners() {
+async function rebindAllAppListeners() {
   for (const appId of Array.from(appListeners.keys())) {
     unbindAppListener(appId);
   }
-  for (const appConfig of appsStore) {
-    bindAppListener(appConfig);
-  }
+  await Promise.all(appsStore.map(appConfig => bindAppListener(appConfig).catch(err => {
+    console.error(`[App Listener] "${appConfig.name}" setup failed: ${err?.message || err}`);
+  })));
 }
 
 // Effective binding status of an app, as shown in the UI.
@@ -520,7 +634,7 @@ function getAppListenStatus(app: AppConfig) {
   }
   const s = appListenStatus.get(app.id);
   if (s?.bound) {
-    return { state: 'bound', bound: true, address: s.address };
+    return { state: 'bound', bound: true, address: s.address, scheme: s.scheme };
   }
   if (s?.reason === 'same-as-system') {
     return { state: 'same-as-system', bound: false, address: s.address, error: `Uses the system server address (${s.address})` };
@@ -547,6 +661,7 @@ function ensureDefaultAppAndRoutes() {
       basePath: serverConfig.basePath,
       listenPort: serverConfig.listenPort, // Lock to persisted server config
       listenHost: serverConfig.listenHost,
+      protocols: ['http'],
       isDefault: true,
       enabled: true
     };
@@ -598,11 +713,17 @@ saveConfigToDisk();
 loadLogsFromDisk();
 
 // Syntax Validation Engine
+// Route scripts are executed as ESM modules (so `import https from "https"`
+// etc. are valid), which `new AsyncFunction` can't parse. Strip ESM-only
+// import/export declarations first, then validate the remaining body.
 function validateJavaScriptSyntax(code: string): { valid: boolean; error?: string; line?: number } {
   try {
-    // Attempt to parse JS code constructor
+    const scrubbed = code
+      .replace(/^import\s+[^'"]*['"][^'"]*['"]\s*;?$/gm, ';')
+      .replace(/^import\s+['"][^'"]*['"]\s*;?$/gm, ';')
+      .replace(/^export\s+/gm, ';');
     const AsyncFunction = Object.getPrototypeOf(async function () { }).constructor;
-    new AsyncFunction('request', 'response', 'fetch', 'console', 'process', code);
+    new AsyncFunction('request', 'response', 'fetch', 'console', 'process', scrubbed);
     return { valid: true };
   } catch (err: any) {
     let line: number | undefined = undefined;
@@ -736,6 +857,263 @@ function validateRouteConfig(routeData: Partial<Route>, currentRouteId?: string)
 }
 
 // Route Execution Sandboxing Helper
+// --- Route script module helpers ---
+
+// True for a specifier that must be resolved by node_modules (not builtin,
+// relative/absolute path, or remote/data URL).
+function isBareSpecifier(specifier: string): boolean {
+  if (!specifier) return false;
+  if (specifier.startsWith('node:')) return false;
+  if (specifier.startsWith('.') || specifier.startsWith('/') || specifier.startsWith('file:')
+    || specifier.startsWith('http:') || specifier.startsWith('https:') || specifier.startsWith('data:')) {
+    return false;
+  }
+  return true;
+}
+
+// Map an import specifier to its npm package name ("@scope/pkg/sub" -> "@scope/pkg",
+// "axios/dist/x.js" -> "axios").
+function barePackageName(specifier: string): string {
+  const parts = specifier.split('/');
+  if (specifier.startsWith('@')) return parts.slice(0, 2).join('/');
+  return parts[0];
+}
+
+// Collect every static bare import specifier in the script ("import x from 'pkg'",
+// "import 'pkg'", and dynamic import("pkg")).
+function extractBareImports(code: string): string[] {
+  const out = new Set<string>();
+  const re = /\bimport\b[^;\n]*?\bfrom\s*["']([^"']+)["']|(?:^|\s)\bimport\s*["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code)) !== null) {
+    const spec = m[1] || m[2] || m[3];
+    if (spec && isBareSpecifier(spec)) out.add(barePackageName(spec));
+  }
+  return Array.from(out);
+}
+
+// Try to read the missing package name out of an ESM resolution error.
+function missingPackageFromError(err: any): string | null {
+  const msg = String((err && err.message) || '');
+  const m = msg.match(/Cannot find (?:package|module)\s*['"]?([^'",\s/]+(?:[/][^'",\s]*)?)/i);
+  if (!m) return null;
+  const spec = m[1].replace(/^node:/, '');
+  if (!isBareSpecifier(spec)) return null;
+  return barePackageName(spec);
+}
+
+let cachedPkgManager: string | null = null;
+
+// Prefer bun (the container runtime) for fast installs; fall back to npm.
+function detectPackageManager(): string {
+  if (cachedPkgManager) return cachedPkgManager;
+  try {
+    execFileSync('bun', ['--version'], { stdio: 'ignore' });
+    cachedPkgManager = 'bun';
+  } catch {
+    cachedPkgManager = 'npm';
+  }
+  return cachedPkgManager;
+}
+
+// `bun add <pkg>` / `npm install <pkg>` into data/route-modules.
+async function installPackage(pkg: string): Promise<void> {
+  fs.mkdirSync(ROUTE_MODULES_DIR, { recursive: true });
+  const mgr = detectPackageManager();
+  const args = mgr === 'bun'
+    ? ['add', pkg, '--silent']
+    : ['install', pkg, '--no-audit', '--no-fund', '--loglevel=error'];
+  try {
+    await execFileAsync(mgr, args, { cwd: ROUTE_MODULES_DIR, timeout: 120000, maxBuffer: 1024 * 1024 });
+    console.log(`[Route Modules] Installed "${pkg}" via ${mgr}`);
+  } catch (err: any) {
+    throw new Error(`Failed to auto-install "${pkg}" (${mgr}): ${(err.stderr || err.message || '').toString().slice(0, 500)}`);
+  }
+}
+
+// Bun caches failed module resolutions in-process, so installing a package only
+// AFTER an import fails can never be re-resolved in the same process. Pre-check
+// every top-level bare import and install anything missing BEFORE the first
+// import runs, so the resolver cache never records a negative hit.
+async function ensureBareImportsInstalled(code: string): Promise<void> {
+  if (!AUTO_INSTALL_ENABLED) return;
+  const specs = extractBareImports(code);
+  for (const spec of specs) {
+    const pkgDir = path.join(ROUTE_MODULES_DIR, 'node_modules', ...spec.split('/'));
+    if (fs.existsSync(path.join(pkgDir, 'package.json'))) continue;
+    await installPackage(spec);
+  }
+}
+
+// Route modules are cached by (routeId, codeHash): a module is only re-imported
+// when the route's code changes, and only in-use entries (refs > 0) are pinned.
+// Unused entries are evicted after an idle timeout or when the cache is over its
+// cap, keeping memory bounded.
+interface RouteModuleEntry {
+  hash: string;
+  file: string;
+  module: any;
+  refs: number;      // active executions currently using this module
+  lastUsed: number;  // ms timestamp of last execution
+  created: number;   // ms timestamp when the module was (re)imported
+}
+const routeModuleCache = new Map<string, RouteModuleEntry>();
+const ROUTE_MODULE_CACHE_CAP = 60;
+const ROUTE_MODULE_IDLE_MS = 5 * 60 * 1000;
+const ROUTE_MODULE_CLEAN_INTERVAL_MS = 60 * 1000;
+
+// Deterministic file name for a route version: changing the code changes the
+// hash, which produces a new file URL (so bun re-imports it) while identical
+// code reuses the already-imported module instance.
+function routeModuleFileName(routeId: string, hash: string): string {
+  const safe = String(routeId).replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `__route_${safe}_${hash}.mjs`;
+}
+
+function cleanupRouteModuleCache(now = Date.now()): void {
+  // 1) Evict idle, unused entries (refs === 0 and untouched for a while).
+  for (const [key, entry] of routeModuleCache) {
+    if (entry.refs === 0 && now - entry.lastUsed > ROUTE_MODULE_IDLE_MS) {
+      routeModuleCache.delete(key);
+      fs.unlink(entry.file, () => {});
+    }
+  }
+  // 2) If still over the cap, drop the least-recently-used free entries.
+  if (routeModuleCache.size > ROUTE_MODULE_CACHE_CAP) {
+    const idle = [...routeModuleCache.entries()]
+      .filter(([, e]) => e.refs === 0)
+      .sort((a, b) => a[1].lastUsed - b[1].lastUsed);
+    let excess = routeModuleCache.size - ROUTE_MODULE_CACHE_CAP;
+    for (const [key, entry] of idle) {
+      if (excess <= 0) break;
+      routeModuleCache.delete(key);
+      fs.unlink(entry.file, () => {});
+      excess--;
+    }
+  }
+}
+
+// Turn route code into a real ESM module. `import` statements are hoisted to the
+// top (static imports must live at module scope); the rest becomes the body of an
+// exported async function that receives the per-request sandbox. Reusing the
+// module instance across requests keeps transpile cost to a single import while
+// the request/response stay scoped to each invocation.
+function transformRouteToModule(code: string): string {
+  const importBlocks: string[] = [];
+  const bodyLines: string[] = [];
+  let inImport = false;
+  for (const line of code.split('\n')) {
+    const t = line.trim();
+    if (!inImport) {
+      if (/^import\s/.test(t)) {
+        importBlocks.push(line);
+        inImport = !/["'][^"']*["']\s*;?(\s*\/\/.*)?$/.test(t);
+      } else if (/^export\s/.test(t)) {
+        bodyLines.push(line.replace(/^export\s+/, ''));
+      } else {
+        bodyLines.push(line);
+      }
+    } else {
+      importBlocks.push(line);
+      if (/["'][^"']*["']\s*;?(\s*\/\/.*)?$/.test(line)) inImport = false;
+    }
+  }
+  const imports = importBlocks.join('\n');
+  const body = bodyLines.join('\n');
+  return `${imports}\n\nexport default async function run({ request, response, fetch, console, fs }) {\n${body}\n}\n`;
+}
+
+// Resolve (and import) the cached module for a route, re-importing only when the
+// code changed. Each invocation increments refs so the sweeper never evicts a
+// module that is still executing. Only the documented params are injected
+// (request, response, fetch, console, fs); anything else (https, http, npm
+// packages) must be imported explicitly by the script.
+async function executeRouteModule(
+  route: Route,
+  sandbox: Record<string, any>
+): Promise<void> {
+  const hash = createHash('sha1').update(route.code).digest('hex').slice(0, 12);
+  const cacheKey = `${route.id}:${hash}`;
+  const file = path.join(ROUTE_SCRIPTS_DIR, routeModuleFileName(route.id, hash));
+
+  let entry = routeModuleCache.get(cacheKey);
+  if (!entry) {
+    // Install any missing top-level npm packages BEFORE the first import so bun
+    // never records a negative resolution (which would poison all later imports).
+    await ensureBareImportsInstalled(route.code);
+    fs.mkdirSync(ROUTE_SCRIPTS_DIR, { recursive: true });
+    if (!fs.existsSync(file)) {
+      fs.writeFileSync(file, transformRouteToModule(route.code), 'utf-8');
+    }
+    try {
+      const module = await import(pathToFileURL(file).href);
+      entry = { hash, file, module, refs: 0, lastUsed: Date.now(), created: Date.now() };
+    } catch (scriptErr: any) {
+      const missing = missingPackageFromError(scriptErr);
+      if (missing && AUTO_INSTALL_ENABLED) {
+        // Defensive fallback: pre-install above covers top-level imports, so this
+        // only fires for transitive deps. Best effort — bun's in-process resolver
+        // cache may keep a negative hit, but retrying is cheap.
+        await installPackage(missing);
+        const module = await import(pathToFileURL(file).href);
+        entry = { hash, file, module, refs: 0, lastUsed: Date.now(), created: Date.now() };
+      } else {
+        throw scriptErr;
+      }
+    }
+    routeModuleCache.set(cacheKey, entry);
+    cleanupRouteModuleCache();
+  }
+
+  entry.refs++;
+  entry.lastUsed = Date.now();
+  try {
+    const run = entry.module.default as (sb: Record<string, any>) => Promise<any>;
+    await run(sandbox);
+  } finally {
+    entry.refs--;
+    entry.lastUsed = Date.now();
+  }
+}
+
+// Minimal fetch shim that skips TLS certificate validation. Only used for a
+// route whose `ignoreTls` flag is enabled — per-route opt-in, never global.
+function insecureFetch(url: string | URL, init: any = {}): Promise<any> {
+  return new Promise((resolve, reject) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(String(url));
+    } catch (err: any) {
+      reject(err);
+      return;
+    }
+    const lib = parsed.protocol === 'https:' ? https : http;
+    const req = lib.request(parsed, {
+      method: init.method || 'GET',
+      headers: init.headers || {},
+      agent: parsed.protocol === 'https:' ? insecureAgent : undefined
+    }, (res: any) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => {
+        const body = Buffer.concat(chunks);
+        resolve({
+          status: res.statusCode || 0,
+          ok: !!res.statusCode && res.statusCode >= 200 && res.statusCode < 300,
+          statusText: res.statusMessage || '',
+          headers: res.headers,
+          text: async () => body.toString('utf-8'),
+          json: async () => JSON.parse(body.toString('utf-8'))
+        });
+      });
+    });
+    req.on('error', reject);
+    const body = init.body;
+    if (body != null) req.write(typeof body === 'string' ? body : JSON.stringify(body));
+    req.end();
+  });
+}
+
 async function executeRouteScript(
   route: Route,
   reqInfo: {
@@ -809,15 +1187,24 @@ async function executeRouteScript(
   };
 
   try {
-    const AsyncFunction = Object.getPrototypeOf(async function () { }).constructor;
-    const userFunction = new AsyncFunction('request', 'response', 'fetch', 'console', 'fs', route.code);
-
     const safeReqInfo = {
       ...reqInfo,
       params: reqInfo.params || {}
     };
 
-    await userFunction(safeReqInfo, mockResponse, globalThis.fetch, customConsole, fs);
+    // Run the script as a real ESM module (file-based) so bare `import "pkg"`
+    // specifiers resolve against auto-installed node_modules. The module is
+    // cached by (routeId, codeHash) and re-imported only when the code changes.
+    const sandbox = {
+      request: safeReqInfo,
+      response: mockResponse,
+      // Per-route opt-in: only this route's fetch skips TLS verification.
+      fetch: route.ignoreTls ? insecureFetch : globalThis.fetch,
+      console: customConsole,
+      fs
+    };
+
+    await executeRouteModule(route, sandbox);
 
     if (!responseSent) {
       if (responseBody === null) {
@@ -1008,6 +1395,9 @@ app.post('/internal/apps', (req: Request, res: Response) => {
     listenHost: req.body.listenHost || '0.0.0.0',
     listenPort: Number(req.body.listenPort) || 8080,
     basePath: req.body.basePath ? (req.body.basePath.startsWith('/') ? req.body.basePath : '/' + req.body.basePath) : '/',
+    protocols: Array.isArray(req.body.protocols) && req.body.protocols.length
+      ? req.body.protocols.filter((p: string) => p === 'http' || p === 'https')
+      : ['http'],
     enabled: req.body.enabled !== false,
     isDefault: false,
     createdAt: new Date().toISOString(),
@@ -1097,6 +1487,9 @@ app.put('/internal/apps/:id', async (req: Request, res: Response) => {
     listenHost: req.body.listenHost || '0.0.0.0',
     listenPort: Number(req.body.listenPort),
     basePath: req.body.basePath ? (req.body.basePath.startsWith('/') ? req.body.basePath : '/' + req.body.basePath) : '/',
+    protocols: Array.isArray(req.body.protocols) && req.body.protocols.length
+      ? req.body.protocols.filter((p: string) => p === 'http' || p === 'https')
+      : ['http'],
     enabled: req.body.enabled !== false,
     isDefault: existingApp.isDefault,
     updatedAt: new Date().toISOString()
@@ -1172,6 +1565,7 @@ app.post('/internal/routes', (req: Request, res: Response) => {
     httpMethods: req.body.httpMethods || ['GET', 'ALL'],
     code: req.body.code,
     enabled: req.body.enabled !== false,
+    ignoreTls: req.body.ignoreTls === true,
     priority: Number(req.body.priority) || 10,
     isDefault: false,
     createdAt: new Date().toISOString(),
@@ -1219,6 +1613,7 @@ app.put('/internal/routes/:id', (req: Request, res: Response) => {
     httpMethods: req.body.httpMethods || ['ALL'],
     code: req.body.code,
     enabled: req.body.enabled !== false,
+    ignoreTls: req.body.ignoreTls === true,
     priority: Number(req.body.priority) || 10,
     updatedAt: new Date().toISOString()
   };
@@ -1485,6 +1880,22 @@ app.use(dispatchGateway);
 // ----------------------------------------------------
 // VITE & STATIC SERVING
 // ----------------------------------------------------
+// Startup sweep: remove legacy per-execution files (`__exec_*.mjs` from the old
+// design) and any `__route_*.mjs` files not currently referenced by the cache
+// (deleted routes / superseded code versions), so disk stays clean.
+function cleanOrphanRouteScripts(): void {
+  try {
+    const files = fs.readdirSync(ROUTE_SCRIPTS_DIR);
+    const referenced = new Set<string>();
+    for (const entry of routeModuleCache.values()) referenced.add(entry.file);
+    for (const f of files) {
+      if (f.startsWith('__exec_') || (f.startsWith('__route_') && !referenced.has(path.join(ROUTE_SCRIPTS_DIR, f)))) {
+        fs.unlink(path.join(ROUTE_SCRIPTS_DIR, f), () => {});
+      }
+    }
+  } catch { /* dir may not exist yet */ }
+}
+
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     // Lazy-import Vite (dev only) so the production image needs no Vite/esbuild.
@@ -1528,6 +1939,10 @@ async function startServer() {
   httpServer = app.listen(serverConfig.listenPort, serverConfig.listenHost, () => {
     console.log(`Relay Server & Web Hub listening on http://${serverConfig.listenHost}:${serverConfig.listenPort}`);
   });
+
+  // Periodically evict idle/unused cached route modules and their on-disk files.
+  setInterval(() => cleanupRouteModuleCache(), ROUTE_MODULE_CLEAN_INTERVAL_MS);
+  cleanOrphanRouteScripts();
 
   rebindAllAppListeners();
 }

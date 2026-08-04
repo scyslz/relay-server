@@ -80,6 +80,7 @@ export const AppModal: React.FC<AppModalProps> = ({
     listenHost: '0.0.0.0',
     listenPort: 8080,
     basePath: '/',
+    protocols: ['http'],
     enabled: true
   });
 
@@ -98,6 +99,7 @@ export const AppModal: React.FC<AppModalProps> = ({
         listenHost: '0.0.0.0',
         listenPort: 8080,
         basePath: '/',
+        protocols: ['http'],
         enabled: true
       });
     }
@@ -115,6 +117,17 @@ export const AppModal: React.FC<AppModalProps> = ({
     if (attempted) {
       setFieldErrors(validateForm(next));
     }
+  };
+
+  const currentProtocols = (formData.protocols && formData.protocols.length) ? formData.protocols : ['http'];
+
+  const handleProtocolToggle = (protocol: 'http' | 'https') => {
+    const has = currentProtocols.includes(protocol);
+    const next = has
+      ? currentProtocols.filter(p => p !== protocol)   // removing is allowed so long as one stays
+      : [...currentProtocols, protocol];
+    if (next.length === 0) return;                      // keep at least one protocol selected
+    setFormData({ ...formData, protocols: next });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -137,7 +150,8 @@ export const AppModal: React.FC<AppModalProps> = ({
       name: (formData.name || '').trim(),
       listenHost: (formData.listenHost || '').trim(),
       listenPort: Number(formData.listenPort),
-      basePath: (formData.basePath || '').trim()
+      basePath: (formData.basePath || '').trim(),
+      protocols: currentProtocols.filter(p => p === 'http' || p === 'https')
     };
 
     try {
@@ -252,6 +266,37 @@ export const AppModal: React.FC<AppModalProps> = ({
               />
               {fieldErrors.listenPort && <p className="text-rose-400 text-[11px] mt-1">{fieldErrors.listenPort}</p>}
             </div>
+          </div>
+
+          {/* Protocols */}
+          <div className="space-y-1">
+            <label className={`block ${styles.textSecondary} font-medium flex items-center gap-1`}>
+              <Globe className={`w-3.5 h-3.5 ${styles.textMuted}`} />
+              <span>Protocols *</span>
+            </label>
+            <div className="flex items-center space-x-4">
+              <label className="flex items-center space-x-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={currentProtocols.includes('http')}
+                  onChange={() => handleProtocolToggle('http')}
+                  className={`rounded ${styles.inputBorder} text-indigo-600 focus:ring-indigo-500 ${styles.inputBg}`}
+                />
+                <span className={`${styles.textSecondary} font-medium`}>HTTP</span>
+              </label>
+              <label className="flex items-center space-x-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={currentProtocols.includes('https')}
+                  onChange={() => handleProtocolToggle('https')}
+                  className={`rounded ${styles.inputBorder} text-indigo-600 focus:ring-indigo-500 ${styles.inputBg}`}
+                />
+                <span className={`${styles.textSecondary} font-medium`}>HTTPS</span>
+              </label>
+            </div>
+            <p className={`text-[11px] ${styles.textMuted}`}>
+              At least one must stay selected. HTTPS uses an auto-generated self-signed certificate stored in the crt/ directory next to the config file.
+            </p>
           </div>
 
           {/* System Server Port Change Warning */}

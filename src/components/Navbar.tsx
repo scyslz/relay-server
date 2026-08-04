@@ -48,10 +48,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <h1 className={`font-bold text-base sm:text-lg tracking-tight ${styles.textPrimary}`}>
                   Relay
                 </h1>
-                <span className="px-1.5 py-0.5 text-[10px] sm:text-xs font-mono font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  :3000
-                </span>
               </div>
               <p className={`text-[11px] ${styles.textMuted} hidden md:block`}>
                 Multi-App Relay Router & Sandbox

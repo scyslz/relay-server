@@ -1,4 +1,4 @@
-import { AppConfig, Route, ServerConfig } from './types';
+import { AppConfig, Protocol, Route, ServerConfig } from './types';
 
 export const SYSTEM_APP_ID = 'app-default-system';
 
@@ -18,6 +18,7 @@ export const SYSTEM_APP: AppConfig = Object.freeze({
   listenHost: DEFAULT_SERVER_CONFIG.listenHost,
   listenPort: DEFAULT_SERVER_CONFIG.listenPort,
   basePath: '/',
+  protocols: ['http'] as Protocol[],
   enabled: true,
   isDefault: true,
   createdAt: '2026-01-01T00:00:00.000Z',

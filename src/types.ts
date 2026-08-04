@@ -2,6 +2,7 @@ export type MatchStrategy = 'prefix' | 'contains' | 'equal' | 'regex';
 export type MatchTarget = 'path' | 'host' | 'both';
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'ALL';
 export type ThemeMode = 'dark' | 'light' | 'midnight';
+export type Protocol = 'http' | 'https';
 
 export interface Route {
   id: string;
@@ -15,6 +16,7 @@ export interface Route {
   httpMethods: HttpMethod[];
   code: string;
   enabled: boolean;
+  ignoreTls?: boolean; // per-route opt-in: skip TLS verification for outgoing HTTPS requests
   priority: number; // Lower number = higher priority
   isDefault?: boolean;
   createdAt: string;
@@ -28,6 +30,7 @@ export interface AppConfig {
   listenHost: string;
   listenPort: number;
   basePath: string;
+  protocols?: Protocol[]; // ['http'] | ['https'] | ['http','https']; default ['http']
   enabled: boolean;
   isDefault?: boolean; // Cannot be deleted
   createdAt: string;
@@ -37,6 +40,7 @@ export interface AppConfig {
     state: 'system' | 'bound' | 'failed' | 'disabled' | 'same-as-system' | 'unknown';
     bound: boolean;
     address?: string;
+    scheme?: string;
     error?: string;
   };
 }

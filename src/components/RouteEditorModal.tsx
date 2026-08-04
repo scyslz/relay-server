@@ -41,6 +41,7 @@ response.status(200).json({
   timestamp: new Date().toISOString()
 });`,
     enabled: true,
+    ignoreTls: false,
     priority: 10
   });
 
@@ -81,6 +82,7 @@ response.status(200).json({
   time: new Date().toISOString()
 });`,
         enabled: true,
+        ignoreTls: false,
         priority: 10
       });
     }
@@ -278,6 +280,23 @@ response.status(200).json({
                     </button>
                   );
                 })}
+              </div>
+
+              {/* Per-route TLS verification bypass (opt-in, not global) */}
+              <div className="flex items-center space-x-1.5">
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, ignoreTls: !formData.ignoreTls })}
+                  className={`px-2 py-0.5 rounded text-[11px] font-mono font-bold transition-all border flex items-center gap-1 ${
+                    formData.ignoreTls
+                      ? 'bg-amber-600 text-white border-amber-500 shadow-sm'
+                      : `${styles.inputBg} ${styles.textMuted} border ${styles.inputBorder} hover:text-amber-400`
+                  }`}
+                  title="Skip TLS/SSL certificate verification for this route's outgoing HTTPS requests"
+                >
+                  <Shield className="w-3 h-3" />
+                  {formData.ignoreTls ? 'Ignore TLS: ON' : 'Ignore TLS: OFF'}
+                </button>
               </div>
 
               {/* Custom Preset Dropdown */}

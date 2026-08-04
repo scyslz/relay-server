@@ -160,7 +160,15 @@ export const AppList: React.FC<AppListProps> = ({
                   }`}
                 >
                   <Network className="w-3 h-3 opacity-60" />
-                  <span>{app.listenHost}:{app.listenPort}</span>
+                  <span>
+                    {(() => {
+                      const protocols = (app.protocols && app.protocols.length) ? app.protocols : ['http'];
+                      const scheme = protocols.includes('http') && protocols.includes('https')
+                        ? 'http(s)://'
+                        : `${protocols[0]}://`;
+                      return `${scheme}${app.listenHost}:${app.listenPort}`;
+                    })()}
+                  </span>
                 </div>
 
                 <div className="flex items-center gap-1">
