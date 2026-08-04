@@ -16,11 +16,11 @@ RUN npm run build
 FROM node:20-alpine AS deps
 WORKDIR /deps
 RUN npm init -y >/dev/null \
-    && npm install --omit=dev --omit=optional --no-audit --no-fund express@4.21.2 selfsigned@2.4.1 \
+    && npm install --omit=dev --omit=optional --no-audit --no-fund express@4.21.2 selfsigned@2.4.1 undici@7.29.0 \
     && npm cache clean --force
 
-# ---------- Stage 3: Runtime (Bun, ~43MB base) ----------
-FROM oven/bun:1-alpine AS runtime
+# ---------- Stage 3: Runtime (Node) ----------
+FROM node:20-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 
@@ -44,4 +44,4 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 VOLUME ["/app/data"]
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["/usr/local/bin/bun", "dist/server.cjs"]
+CMD ["node", "dist/server.cjs"]
