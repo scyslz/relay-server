@@ -940,6 +940,26 @@ async function installPackage(pkg: string): Promise<void> {
   }
 }
 
+// Find an already-installed copy of `spec` by walking up from the route scripts
+// dir, WITHOUT consulting the runtime resolver (Bun caches negative hits). The
+// walk mirrors bare-specifier ESM resolution but skips data/route-modules so we
+// only match packages bundled in the server's own node_modules tree.
+function resolveBundledImport(spec: string): string | null {
+  const rel = path.join('node_modules', ...spec.split('/'));
+  let dir = ROUTE_SCRIPTS_DIR;
+  for (;;) {
+    if (dir === ROUTE_MODULES_DIR) {
+      dir = path.dirname(dir);
+      continue;
+    }
+    const pkg = path.join(dir, rel);
+    if (fs.existsSync(path.join(pkg, 'package.json'))) return pkg;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
 // Bun caches failed module resolutions in-process, so installing a package only
 // AFTER an import fails can never be re-resolved in the same process. Pre-check
 // every top-level bare import and install anything missing BEFORE the first
@@ -949,7 +969,15 @@ async function ensureBareImportsInstalled(code: string): Promise<void> {
   const specs = extractBareImports(code);
   for (const spec of specs) {
     const pkgDir = path.join(ROUTE_MODULES_DIR, 'node_modules', ...spec.split('/'));
-    if (fs.existsSync(path.join(pkgDir, 'package.json'))) continue;
+    const bundled = resolveBundledImport(spec);
+    if (fs.existsSync(path.join(pkgDir, 'package.json'))) {
+      // Already auto-installed, but if the server also bundles this package the
+      // bundled copy wins resolution anyway — drop the auto-installed copy so a
+      // newer (possibly broken, e.g. undici@8 under Bun) version never shadows it.
+      if (bundled) fs.rmSync(pkgDir, { recursive: true, force: true });
+      continue;
+    }
+    if (bundled) continue;
     await installPackage(spec);
   }
 }
