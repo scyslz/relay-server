@@ -888,17 +888,49 @@ function barePackageName(specifier: string): string {
   return parts[0];
 }
 
+// Split a bare specifier into its package name and optional pinned version, e.g.
+// "undici@7.29.0" -> { name: "undici", version: "7.29.0" },
+// "@scope/pkg@^1.2" -> { name: "@scope/pkg", version: "^1.2" },
+// "axios/dist/x.js" -> { name: "axios/dist/x.js" }.
+function splitImportSpec(spec: string): { name: string; version?: string } {
+  if (!isBareSpecifier(spec)) return { name: spec };
+  const at = spec.lastIndexOf('@');
+  if (at > 0) {
+    const candidate = spec.slice(at + 1);
+    if (/^(?:[~^><=]*\d|latest|next|\*)/.test(candidate)) {
+      return { name: spec.slice(0, at), version: candidate };
+    }
+  }
+  return { name: spec };
+}
+
 // Collect every static bare import specifier in the script ("import x from 'pkg'",
-// "import 'pkg'", and dynamic import("pkg")).
-function extractBareImports(code: string): string[] {
-  const out = new Set<string>();
+// "import 'pkg'", and dynamic import("pkg")), keeping any pinned @version.
+function extractBareImports(code: string): { name: string; version?: string }[] {
+  const out = new Map<string, { name: string; version?: string }>();
   const re = /\bimport\b[^;\n]*?\bfrom\s*["']([^"']+)["']|(?:^|\s)\bimport\s*["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(code)) !== null) {
     const spec = m[1] || m[2] || m[3];
-    if (spec && isBareSpecifier(spec)) out.add(barePackageName(spec));
+    if (!spec || !isBareSpecifier(spec)) continue;
+    const { name, version } = splitImportSpec(spec);
+    const key = `${name}${version ? '@' + version : ''}`;
+    if (!out.has(key)) out.set(key, { name, version });
   }
-  return Array.from(out);
+  return Array.from(out.values());
+}
+
+// Strip the pinned @version from import specifiers ("from 'undici@7.29.0'" ->
+// "from 'undici'"), so the version is only used by the installer and the real
+// ESM resolver still sees a plain bare specifier.
+function stripImportVersions(imports: string): string {
+  const re = /(\b(?:from|import)\b\s*["'])([^"']+)(["'])/g;
+  return imports.replace(re, (full, pre, spec, post) => {
+    if (!isBareSpecifier(spec)) return full;
+    const { name, version } = splitImportSpec(spec);
+    if (!version) return full;
+    return `${pre}${name}${post}`;
+  });
 }
 
 // Try to read the missing package name out of an ESM resolution error.
@@ -964,13 +996,35 @@ function resolveBundledImport(spec: string): string | null {
 // AFTER an import fails can never be re-resolved in the same process. Pre-check
 // every top-level bare import and install anything missing BEFORE the first
 // import runs, so the resolver cache never records a negative hit.
+// Read the installed version of an auto-installed package ("" if not present).
+function readInstalledVersion(pkgDir: string): string {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf-8')).version || '';
+  } catch {
+    return '';
+  }
+}
+
 async function ensureBareImportsInstalled(code: string): Promise<void> {
   if (!AUTO_INSTALL_ENABLED) return;
   const specs = extractBareImports(code);
-  for (const spec of specs) {
-    const pkgDir = path.join(ROUTE_MODULES_DIR, 'node_modules', ...spec.split('/'));
-    const bundled = resolveBundledImport(spec);
-    if (fs.existsSync(path.join(pkgDir, 'package.json'))) {
+  for (const { name, version } of specs) {
+    const pkgDir = path.join(ROUTE_MODULES_DIR, 'node_modules', ...name.split('/'));
+    const haveLocal = fs.existsSync(path.join(pkgDir, 'package.json'));
+    const bundled = resolveBundledImport(name);
+
+    if (version) {
+      // Explicit @version pin — honor it even if the server bundles the package.
+      // Reinstall only when we have no local copy or an exact pin is unsatisfied.
+      let needInstall = !haveLocal;
+      if (haveLocal && /^[0-9][0-9.]*$/.test(version) && readInstalledVersion(pkgDir) !== version) {
+        needInstall = true;
+      }
+      if (needInstall) await installPackage(`${name}@${version}`);
+      continue;
+    }
+
+    if (haveLocal) {
       // Already auto-installed, but if the server also bundles this package the
       // bundled copy wins resolution anyway — drop the auto-installed copy so a
       // newer (possibly broken, e.g. undici@8 under Bun) version never shadows it.
@@ -978,7 +1032,7 @@ async function ensureBareImportsInstalled(code: string): Promise<void> {
       continue;
     }
     if (bundled) continue;
-    await installPackage(spec);
+    await installPackage(name);
   }
 }
 
@@ -1055,7 +1109,7 @@ function transformRouteToModule(code: string): string {
       if (/["'][^"']*["']\s*;?(\s*\/\/.*)?$/.test(line)) inImport = false;
     }
   }
-  const imports = importBlocks.join('\n');
+  const imports = stripImportVersions(importBlocks.join('\n'));
   const body = bodyLines.join('\n');
   return `${imports}\n\nexport default async function run({ request, response, fetch, console, fs }) {\n${body}\n}\n`;
 }
