@@ -66,23 +66,71 @@ if (process.env.RELAY_TLS_INSECURE === 'true') {
 // Log retention & paging: keep at most MAX_LOG_ENTRIES records (newest-first)
 // in memory and on disk, and serve pages of at most DEFAULT_LOGS_LIMIT at a time
 // so large histories never slow the UI.
+//
+// Logs are ALSO bounded by a total byte budget: route scripts frequently log the
+// bodies they relay (e.g. console.log(payload)), so a 2000-entry cap alone can
+// pin the log file at tens of MB. The budget trims the oldest entries until the
+// retained history (and the JSON string built during each persist) fits.
 const MAX_LOG_ENTRIES = 2000;
+const MAX_LOG_FILE_BYTES = 10 * 1024 * 1024; // upper bound for the log file & in-memory history
+const MAX_LOG_LINE_CHARS = 8 * 1024;         // truncate a single captured console line / stack trace
 const DEFAULT_LOGS_LIMIT = 200;
+
+// RELAY_LOG_DETAIL: capture route-script console output & stack traces into the
+// execution log. Set to "false" to store ONLY the summary record
+// (method/url/status/duration) — scripts' console.* calls become no-ops, so the
+// log file stays tiny even when routes log large relayed bodies. Default: true.
+const LOG_DETAIL_ENABLED = process.env.RELAY_LOG_DETAIL !== 'false';
 
 let appsStore: AppConfig[] = [];
 let routesStore: Route[] = [];
 let executionLogs: ExecutionLog[] = [];
 
+// Approximate retained byte total (kept in sync with executionLogs). Character
+// counts under-count multi-byte UTF-8, so persistLogsToDisk re-checks the exact
+// serialized size and trims there too — the file budget is authoritative.
+let retainedLogBytes = 0;
+
 let logPersistTimer: NodeJS.Timeout | null = null;
 
-// Persist the execution log history to disk (newest-first, capped).
+// Rough byte estimate for a log entry (string char lengths + fixed overhead).
+function estimateLogEntryBytes(entry: ExecutionLog): number {
+  let bytes = 200;
+  const add = (s?: string) => { if (s) bytes += s.length; };
+  add(entry.id); add(entry.timestamp); add(entry.appId); add(entry.appName);
+  add(entry.routeId); add(entry.routeName); add(entry.method); add(entry.url);
+  add(entry.path); add(entry.clientIp); add(entry.errorMessage); add(entry.errorStack);
+  for (const l of entry.logs || []) bytes += l.length;
+  return bytes;
+}
+
+// Trim the oldest entries until both the count cap and the byte budget hold.
+function trimLogsToBudget() {
+  while (executionLogs.length > MAX_LOG_ENTRIES || retainedLogBytes > MAX_LOG_FILE_BYTES) {
+    const evicted = executionLogs.pop();
+    if (!evicted) break;
+    retainedLogBytes -= estimateLogEntryBytes(evicted);
+  }
+}
+
+// Persist the execution log history to disk (newest-first, compact JSON, atomic).
 function persistLogsToDisk() {
   try {
     const dir = path.dirname(LOG_FILE_PATH);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(LOG_FILE_PATH, JSON.stringify(executionLogs, null, 2), 'utf-8');
+    // Exact-size enforcement: the file never exceeds the budget even though the
+    // in-memory estimate only counts characters.
+    let json = JSON.stringify(executionLogs);
+    while (executionLogs.length > 0 && Buffer.byteLength(json, 'utf-8') > MAX_LOG_FILE_BYTES) {
+      executionLogs.pop();
+      json = JSON.stringify(executionLogs);
+    }
+    // Write to a temp file and rename so a crash mid-write can't corrupt history.
+    const tmpPath = LOG_FILE_PATH + '.tmp';
+    fs.writeFileSync(tmpPath, json, 'utf-8');
+    fs.renameSync(tmpPath, LOG_FILE_PATH);
   } catch (err) {
     console.error('[Log Persistence] Error saving log history:', err);
   }
@@ -97,7 +145,7 @@ function scheduleLogPersist() {
   }, 1000);
 }
 
-// Load persisted log history at startup (newest-first, capped).
+// Load persisted log history at startup (newest-first, capped to count + bytes).
 function loadLogsFromDisk() {
   try {
     if (fs.existsSync(LOG_FILE_PATH)) {
@@ -108,12 +156,20 @@ function loadLogsFromDisk() {
     console.error('[Log Persistence] Error loading log history, starting fresh:', err);
     executionLogs = [];
   }
+  retainedLogBytes = executionLogs.reduce((sum, e) => sum + estimateLogEntryBytes(e), 0);
+  trimLogsToBudget();
 }
 
-// Record a new execution log entry (newest-first) and trim to the cap.
+// Truncate an oversized captured line so one pathological log can't balloon a file.
+function truncateLogLine(text: string): string {
+  return text.length > MAX_LOG_LINE_CHARS ? text.slice(0, MAX_LOG_LINE_CHARS) + ' ...[truncated]' : text;
+}
+
+// Record a new execution log entry (newest-first) and trim to the caps.
 function pushExecutionLog(entry: ExecutionLog) {
   executionLogs.unshift(entry);
-  if (executionLogs.length > MAX_LOG_ENTRIES) executionLogs.pop();
+  retainedLogBytes += estimateLogEntryBytes(entry);
+  trimLogsToBudget();
   scheduleLogPersist();
 }
 
@@ -1234,13 +1290,18 @@ async function executeRouteScript(
   stack?: string;
 }> {
   const capturedLogs: string[] = [];
-  
-  const customConsole = {
-    log: (...args: any[]) => capturedLogs.push(`[LOG] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}`),
-    warn: (...args: any[]) => capturedLogs.push(`[WARN] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}`),
-    error: (...args: any[]) => capturedLogs.push(`[ERROR] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}`),
-    info: (...args: any[]) => capturedLogs.push(`[INFO] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}`),
-  };
+
+  // When RELAY_LOG_DETAIL=false the sandbox console is a no-op: routes run the
+  // same, but their console.* output is neither captured nor stored, so the log
+  // history keeps only summary records.
+  const customConsole = LOG_DETAIL_ENABLED
+    ? {
+        log: (...args: any[]) => capturedLogs.push(truncateLogLine(`[LOG] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}`)),
+        warn: (...args: any[]) => capturedLogs.push(truncateLogLine(`[WARN] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}`)),
+        error: (...args: any[]) => capturedLogs.push(truncateLogLine(`[ERROR] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}`)),
+        info: (...args: any[]) => capturedLogs.push(truncateLogLine(`[INFO] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}`)),
+      }
+    : { log: () => {}, warn: () => {}, error: () => {}, info: () => {} };
 
   let responseStatus = 200;
   let responseHeaders: Record<string, string> = { 'Content-Type': 'application/json' };

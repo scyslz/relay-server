@@ -10,6 +10,9 @@ services:
       # Explicit production mode: the Vite dev server (300MB+) is only ever
       # started when NODE_ENV=development, so keep this set for deployments.
       - NODE_ENV=production
+      # Keep the V8 heap under the container memory limit (mem_limit 512m), so
+      # the runtime never gets OOM-killed by its own GC headroom.
+      - NODE_OPTIONS=--max-old-space-size=384
       # System server port when starting with no config file. If a config file
       # exists (./data/relay-config.json), its server.listenPort wins instead.
       - PORT=${RELAY_PORT:-3000}
@@ -17,6 +20,10 @@ services:
       # (fetch/https/axios). Off by default; enable only if needed:
       #   RELAY_TLS_INSECURE=true
       - RELAY_TLS_INSECURE=${RELAY_TLS_INSECURE:-false}
+      # Log detail: set to "false" to store only summary records (no route-script
+      # console output / stack traces) — keeps the log file small under heavy load.
+      - RELAY_LOG_DETAIL=${RELAY_LOG_DETAIL:-true}
+    mem_limit: 512m
     ports:
       - "${RELAY_PORT:-3000}:${RELAY_PORT:-3000}"
     volumes:
