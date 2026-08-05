@@ -14,6 +14,8 @@ registered App and run custom handler scripts.
 - **Sandboxed Isolation** — each request runs in its own isolated context; errors
   are caught and logged without crashing the server.
 - **Execution Logs** — real-time traces, console output, and latency metrics.
+- **In-Container URL Templates** — route scripts can reference other Apps/routes
+  by name (`${app::route}`) without hardcoding host:port; resolved at save/load.
 - **Themes** — Dark Slate / Light Crisp / Midnight Cyber.
 - **Persistence** — apps, routes, and logs are persisted to disk and survive restarts.
 
@@ -86,3 +88,40 @@ execution logs in `data/relay-logs.json`. The system server listens on the
 address/port defined by `DEFAULT_SERVER_CONFIG` and is editable via the UI.
 
 HTTP JSON body limit is `10mb` (both the system server and per-App sub-servers).
+
+## In-Container URL Templates
+
+Route scripts run inside the same process/container, so instead of hardcoding
+`http://127.0.0.1:8081/auth/token` you can reference Apps and routes by name with
+`${app::route}` templates. The server recognizes them itself and resolves them to
+concrete URLs when the route is **saved** and **loaded** (never at request time),
+so a broken reference fails fast instead of silently hitting a dead URL.
+
+| Template      | Meaning                          | Resolves to                              |
+| ------------- | -------------------------------- | ---------------------------------------- |
+| `${::a}`      | current App, route `a`           | `<origin>/<route path>`                  |
+| `${a}`        | current App, route `a` (alias)   | `<origin>/<route path>`                  |
+| `${b::}`      | App `b` base URL                 | `scheme://host:port/basePath`            |
+| `${c::d}`     | App `c`, route `d`               | `<origin of c>/<route d path>`           |
+
+- The scheme **prefers http** and falls back to https only when the target App
+  exposes https alone.
+- `${b::}` looks the App up by **name**; the current-App self-reference
+  (`${::a}` / `${a}`) is resolved from the route's own App by id.
+- If a `${::...}` template cannot be resolved (unknown App or route), saving is
+  rejected and load-time errors are reported in the server log.
+- Bare `${a}` tokens are substituted only when `a` matches a route of the current
+  App; otherwise they are left untouched so genuine JS template literals
+  (`${request.url}`) keep working.
+
+Example — relay a request to the `auth` App's `token` route:
+
+```js
+const res = await fetch('${auth::token}', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ username: 'admin', password: 'secret' })
+});
+const data = await res.json();
+response.status(res.status).json(data);
+```

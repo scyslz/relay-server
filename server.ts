@@ -268,6 +268,16 @@ function loadConfigFromDisk() {
       appsStore = presetUserApps();
       routesStore = presetUserRoutes();
     }
+
+    // Resolve ${app::route} URL templates at load time: report any route whose
+    // code references an App or route that no longer exists, so stale configs
+    // surface here instead of failing silently on the first request.
+    for (const route of routesStore) {
+      const currentApp = findAppById(route.appId);
+      for (const msg of validateUrlTemplatesInCode(route.code || '', currentApp)) {
+        console.error(`[Config Persistence] Route "${route.name}" (${route.id}): ${msg}`);
+      }
+    }
   } catch (err) {
     console.error('[Config Persistence] Error loading configuration file, using preset fallback:', err);
     appsStore = presetUserApps();
@@ -889,6 +899,13 @@ function validateRouteConfig(routeData: Partial<Route>, currentRouteId?: string)
         line: syntaxResult.line
       });
     }
+
+    // Resolve ${app::route} URL templates at save time: every referenced App or
+    // route must exist, otherwise saving fails fast instead of at module build.
+    const currentApp = routeData.appId ? findAppById(routeData.appId) : null;
+    for (const msg of validateUrlTemplatesInCode(code, currentApp)) {
+      errors.push({ field: 'code', message: msg, severity: 'error' });
+    }
   }
 
   // Check Route Overlap / Conflict within same App
@@ -1179,7 +1196,12 @@ function transformRouteToModule(code: string): string {
 // code changed. Also used at startup to pre-import every enabled route so missing
 // packages / syntax errors surface before the first request.
 async function loadRouteModule(route: Route): Promise<RouteModuleEntry> {
-  const hash = createHash('sha1').update(route.code).digest('hex').slice(0, 12);
+  // The App this route belongs to is the "current app" used to resolve ${...}
+  // URL templates ({$a} / ${::a} self-references). Resolved at module-build
+  // time (load), so execution never re-parses templates.
+  const currentApp = findAppById(route.appId) || getSystemApp();
+  const resolvedCode = resolveUrlTemplatesInCode(route.code, currentApp);
+  const hash = createHash('sha1').update(resolvedCode).digest('hex').slice(0, 12);
   const cacheKey = `${route.id}:${hash}`;
   const file = path.join(ROUTE_SCRIPTS_DIR, routeModuleFileName(route.id, hash));
 
@@ -1191,7 +1213,7 @@ async function loadRouteModule(route: Route): Promise<RouteModuleEntry> {
   await ensureBareImportsInstalled(route.code);
   fs.mkdirSync(ROUTE_SCRIPTS_DIR, { recursive: true });
   if (!fs.existsSync(file)) {
-    fs.writeFileSync(file, transformRouteToModule(route.code), 'utf-8');
+    fs.writeFileSync(file, transformRouteToModule(resolvedCode), 'utf-8');
   }
   try {
     const module = await import(pathToFileURL(file).href);
@@ -1266,6 +1288,119 @@ function insecureFetch(url: string | URL, init: any = {}): Promise<any> {
     if (body != null) req.write(typeof body === 'string' ? body : JSON.stringify(body));
     req.end();
   });
+}
+
+// ---------------------------------------------------------------------------
+// IN-CONTAINER URL TEMPLATES
+// Route scripts may reference other Apps' routes by name using ${app::route}
+// templates. The server recognizes and resolves these itself at save/load time:
+//
+//   ${::a}     current App's route "a"  -> <origin>/<route path>
+//   ${b::}     App "b" base URL         -> scheme://host:port/basePath
+//   ${c::d}    App "c" route "d"        -> <origin of c>/<route d path>
+//   ${a}       current App's route "a"  (bare form, same as ${::a})
+//
+// An unresolvable name (no such App or route) is reported at save/load time and
+// aborts the route's module build, so a bad reference can never silently hit a
+// dead URL at runtime.
+// ---------------------------------------------------------------------------
+
+// <scheme>://<host>:<port> for an App; scheme prefers http and falls back to
+// https only when the App exposes https alone.
+function appOrigin(app: AppConfig): string {
+  const protocols = (app.protocols && app.protocols.length) ? app.protocols : ['http'];
+  const scheme = protocols.includes('http') ? 'http' : 'https';
+  const host = app.listenHost || '0.0.0.0';
+  const port = app.listenPort;
+  return `${scheme}://${host}:${port}`;
+}
+
+// scheme://host:port/basePath for an App (basePath omitted when it is "/").
+function appBaseUrl(app: AppConfig): string {
+  const basePath = app.basePath && app.basePath !== '/' ? app.basePath : '';
+  return appOrigin(app) + basePath;
+}
+
+// Split a ${...} token into its app/route parts.
+//   "${::a}"  -> { appName: null, routeName: "a" }
+//   "${b::}"  -> { appName: "b", routeName: null }
+//   "${c::d}" -> { appName: "c", routeName: "d" }
+//   "${a}"    -> { appName: null, routeName: "a" }
+function parseUrlTemplateToken(token: string): { appName: string | null; routeName: string | null } {
+  const inner = token.slice(2, -1).trim();
+  const sep = inner.indexOf('::');
+  if (sep === -1) return { appName: null, routeName: inner || null };
+  return { appName: inner.slice(0, sep).trim() || null, routeName: inner.slice(sep + 2).trim() || null };
+}
+
+// Find an App by name (system App included: it lives in appsStore).
+function findAppByName(name: string): AppConfig | null {
+  const found = appsStore.find(a => a.name === name);
+  if (found) return found;
+  const sys = getSystemApp();
+  return sys.name === name ? sys : null;
+}
+
+// Resolve an App by id (whether a user App or the system App, which may not be
+// present in appsStore at load/validation time before ensureDefaultAppAndRoutes).
+function findAppById(id: string): AppConfig | null {
+  if (id === SYSTEM_APP_ID) return getSystemApp();
+  return appsStore.find(a => a.id === id) || null;
+}
+
+// Find a route by name within an App (system routes included).
+function findRouteByName(app: AppConfig, routeName: string): Route | null {
+  const userRoute = routesStore.find(r => r.appId === app.id && r.name === routeName);
+  if (userRoute) return userRoute;
+  return SYSTEM_ROUTES.find(r => r.appId === app.id && r.name === routeName) || null;
+}
+
+// Resolve one ${...} token to a concrete URL, or null when unresolvable.
+function resolveUrlToken(token: string, currentApp: AppConfig): string | null {
+  const { appName, routeName } = parseUrlTemplateToken(token);
+  const app = appName ? findAppByName(appName) : currentApp;
+  if (!app) return null;
+  if (!routeName) return appBaseUrl(app);
+  const route = findRouteByName(app, routeName);
+  if (!route) return null;
+  return appOrigin(app) + route.pathPattern;
+}
+
+const URL_TEMPLATE_RE = /\$\{([^{}]*)\}/g;
+
+// Replace URL templates in route code with concrete URLs at module-build time.
+// Explicit ${::...} tokens that cannot be resolved throw (fail loudly); bare
+// ${name} tokens are substituted only when they resolve to a current-App route,
+// otherwise left untouched so genuine JS template literals (${request.url})
+// keep working.
+function resolveUrlTemplatesInCode(code: string, currentApp: AppConfig): string {
+  return code.replace(URL_TEMPLATE_RE, (token) => {
+    const url = resolveUrlToken(token, currentApp);
+    if (url !== null) return url;
+    if (token.includes('::')) {
+      throw new Error(`[URL Template] Cannot resolve "${token}" in route code: no matching App or route.`);
+    }
+    return token;
+  });
+}
+
+// Validate URL templates in route code; returns error messages for every
+// unresolvable explicit (::) template. Bare forms are ignored because they may
+// be genuine JS template-literal interpolations.
+function validateUrlTemplatesInCode(code: string, currentApp: AppConfig | null): string[] {
+  if (!currentApp || !code) return [];
+  const errors: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = URL_TEMPLATE_RE.exec(code)) !== null) {
+    const token = m[0];
+    if (!token.includes('::')) continue;
+    if (resolveUrlToken(token, currentApp) !== null) continue;
+    const { appName, routeName } = parseUrlTemplateToken(token);
+    errors.push(appName
+      ? `URL template "${token}" cannot be resolved: App "${appName}"${routeName ? ` or route "${routeName}"` : ''} not found.`
+      : `URL template "${token}" cannot be resolved: route "${routeName}" not found in this App.`);
+  }
+  return errors;
 }
 
 async function executeRouteScript(
