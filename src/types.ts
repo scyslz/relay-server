@@ -4,6 +4,11 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'ALL';
 export type ThemeMode = 'dark' | 'light' | 'midnight';
 export type Protocol = 'http' | 'https';
 
+// Which execution engine a route prefers. The default (resident) engine is
+// determined at server startup (isolatedvm unless RELAY_ENGINE overrides it);
+// the other engine is lazily started on first hit and reclaimed when idle.
+export type RouteEngineKind = 'process' | 'isolatedvm';
+
 export interface Route {
   id: string;
   appId: string;
@@ -16,8 +21,8 @@ export interface Route {
   httpMethods: HttpMethod[];
   code: string;
   enabled: boolean;
-  ignoreTls?: boolean; // per-route opt-in: skip TLS verification for outgoing HTTPS requests
   priority: number; // Lower number = higher priority
+  engine?: RouteEngineKind; // Preferred runtime for this route (defaults to resident engine)
   isDefault?: boolean;
   createdAt: string;
   updatedAt: string;

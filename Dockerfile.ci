@@ -7,11 +7,15 @@
 
 # ---------- Stage 1: Runtime deps ----------
 # express + its deps are pure JS, so npm install is safe even under QEMU.
+# isolated-vm is a C++ addon and must compile for the target arch (slower
+# under QEMU, but produces correct native binaries).
 FROM node:20-alpine AS deps
 WORKDIR /deps
-RUN npm init -y >/dev/null \
-    && npm install --omit=dev --omit=optional --no-audit --no-fund express@4.21.2 selfsigned@2.4.1 undici@7.29.0 \
-    && npm cache clean --force
+RUN apk add --no-cache --virtual .build-deps python3 make g++ \
+    && npm init -y >/dev/null \
+    && npm install --omit=dev --omit=optional --no-audit --no-fund express@4.21.2 selfsigned@2.4.1 undici@7.29.0 isolated-vm@5.0.4 \
+    && npm cache clean --force \
+    && apk del .build-deps
 
 # ---------- Stage 2: Runtime (Node) ----------
 FROM node:20-alpine AS runtime

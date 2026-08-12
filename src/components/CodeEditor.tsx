@@ -1,5 +1,9 @@
 import React, { useState } from 'react';
-import Editor, { OnMount } from '@monaco-editor/react';
+import CodeMirror from '@uiw/react-codemirror';
+import { javascript, localCompletionSource, snippets } from '@codemirror/lang-javascript';
+import { oneDark } from '@codemirror/theme-one-dark';
+import { autocompletion, Completion, CompletionContext } from '@codemirror/autocomplete';
+import { EditorView } from '@codemirror/view';
 import { Code, Copy, Check, Sparkles } from 'lucide-react';
 import { ThemeMode } from '../types';
 
@@ -10,13 +14,74 @@ interface CodeEditorProps {
   theme?: ThemeMode;
 }
 
-const EDITOR_COLORS: Record<ThemeMode, { monaco: string; bg: string; toolbarBg: string; border: string; text: string }> = {
-  dark: { monaco: 'vs-dark', bg: '#1e1e1e', toolbarBg: '#252526', border: 'border-slate-800', text: 'text-slate-300' },
-  light: { monaco: 'vs', bg: '#ffffff', toolbarBg: '#f8fafc', border: 'border-slate-200', text: 'text-slate-600' },
-  midnight: { monaco: 'vs-dark', bg: '#000000', toolbarBg: '#09090b', border: 'border-zinc-800', text: 'text-zinc-300' },
+const EDITOR_COLORS: Record<ThemeMode, { bg: string; toolbarBg: string; border: string; text: string }> = {
+  dark: { bg: '#1e1e1e', toolbarBg: '#252526', border: 'border-slate-800', text: 'text-slate-300' },
+  light: { bg: '#ffffff', toolbarBg: '#f8fafc', border: 'border-slate-200', text: 'text-slate-600' },
+  midnight: { bg: '#000000', toolbarBg: '#09090b', border: 'border-zinc-800', text: 'text-zinc-300' },
 };
 
-// JS Completion suggestions for the fallback editor
+// Route sandbox globals surfaced to auto-completion when typing request./response.
+const REQUEST_PROPS: Completion[] = [
+  { label: 'method', type: 'property', detail: 'HTTP method' },
+  { label: 'url', type: 'property', detail: 'Full request URL' },
+  { label: 'path', type: 'property', detail: 'Request path' },
+  { label: 'headers', type: 'property', detail: 'Request headers object' },
+  { label: 'query', type: 'property', detail: 'URL query parameters' },
+  { label: 'body', type: 'property', detail: 'Parsed request body' },
+  { label: 'params', type: 'property', detail: 'Route URL params' },
+  { label: 'host', type: 'property', detail: 'Request host' },
+  { label: 'ip', type: 'property', detail: 'Client IP' },
+];
+
+const RESPONSE_METHODS: Completion[] = [
+  { label: 'status', type: 'function', detail: 'Set HTTP status code' },
+  { label: 'json', type: 'function', detail: 'Send JSON response body' },
+  { label: 'send', type: 'function', detail: 'Send text response body' },
+  { label: 'setHeader', type: 'function', detail: 'Set a response header' },
+  { label: 'redirect', type: 'function', detail: 'Redirect to a URL' },
+];
+
+const JS_COMPLETIONS: Completion[] = [
+  { label: 'request', type: 'variable', detail: 'HTTP request object' },
+  { label: 'response', type: 'variable', detail: 'HTTP response object' },
+];
+
+// Combined completion source layered on top of the editor. When the cursor is
+// inside a sandbox member (`request.` / `response.`) it surfaces the sandbox
+// API first, then always merges in the language's own context-aware JS
+// completions (`localCompletionSource`) plus the JS snippets, so the popup is
+// never poorer than a plain CodeMirror JS editor.
+const completionSource = (context: CompletionContext) => {
+  const before = context.matchBefore(/[a-zA-Z_$][\w$]*\.?/);
+  const local = localCompletionSource(context);
+  if (!before) return local;
+  const text = before.text;
+  let extra: Completion[] = [];
+  if (text.startsWith('request.')) {
+    extra = REQUEST_PROPS;
+  } else if (text.startsWith('response.')) {
+    extra = RESPONSE_METHODS;
+  } else if (!text.includes('.')) {
+    extra = [...JS_COMPLETIONS, ...snippets];
+  }
+  if (!extra.length) return local;
+  const options = [...extra];
+  if (local && Array.isArray(local.options)) {
+    for (const o of local.options) {
+      if (!options.some(e => e.label === o.label)) options.push(o);
+    }
+  }
+  return { from: before.from, options };
+};
+
+// Small global overrides: 13px monospace, match the host editor chrome.
+const editorTheme = EditorView.theme({
+  '&': { fontSize: '13px', height: '100%' },
+  '.cm-scroller': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
+  '&.cm-focused': { outline: 'none' },
+});
+
+// JS Completion hints for the fallback toolbar suggestion panel
 const JS_SUGGESTIONS = [
   { label: 'response.status(200)', detail: 'Set HTTP status code', insert: 'response.status(200)' },
   { label: 'response.json({ ... })', detail: 'Send JSON response', insert: 'response.json({\n  success: true,\n  data: {}\n});' },
@@ -26,6 +91,9 @@ const JS_SUGGESTIONS = [
   { label: 'request.headers', detail: 'Access request headers', insert: 'request.headers' },
   { label: 'request.params', detail: 'Access route URL params', insert: 'request.params' },
   { label: 'request.method', detail: 'Get HTTP method string', insert: 'request.method' },
+  { label: 'fetch(url, options)', detail: 'Outbound HTTP request', insert: 'const res = await fetch(url, {\n  method: \'GET\',\n  headers: { \'Accept\': \'application/json\' }\n});\nconst data = await res.json();' },
+  { label: 'console.log(...)', detail: 'Write to server log', insert: 'console.log(...)' },
+  { label: 'async arrow handler', detail: 'async (request, response) => { ... }', insert: 'async (request, response) => {\n  \n}' },
 ];
 
 export const CodeEditor: React.FC<CodeEditorProps> = ({ value, onChange, height = '100%', theme = 'dark' }) => {
@@ -33,125 +101,11 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ value, onChange, height 
   const [showSuggestions, setShowSuggestions] = useState(false);
   const colors = EDITOR_COLORS[theme];
 
-  // Configure Monaco Editor JS Type Definitions & Completion
-  const handleEditorDidMount: OnMount = (_editor, monaco) => {
-
-    try {
-      // Configure JS compiler options & IntelliSense
-      monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
-        noSemanticValidation: false,
-        noSyntaxValidation: false,
-      });
-
-      monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
-        target: monaco.languages.typescript.ScriptTarget.ES2020,
-        allowNonTsExtensions: true,
-      });
-
-      // Add typings for request and response parameters
-      const extraLib = `
-        declare interface RequestObject {
-          method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | string;
-          url: string;
-          path: string;
-          headers: Record<string, string>;
-          query: Record<string, string>;
-          body: any;
-          params: Record<string, string>;
-          ip: string;
-        }
-
-        declare interface ResponseObject {
-          status(code: number): ResponseObject;
-          json(data: any): ResponseObject;
-          send(data: string | object): ResponseObject;
-          setHeader(name: string, value: string): ResponseObject;
-          redirect(url: string, status?: number): ResponseObject;
-        }
-
-        declare const request: RequestObject;
-        declare const response: ResponseObject;
-        declare const fs: {
-          readFileSync(path: string, encoding?: string): string | Buffer;
-          writeFileSync(path: string, data: string | Buffer, encoding?: string): void;
-          appendFileSync(path: string, data: string | Buffer, encoding?: string): void;
-          existsSync(path: string): boolean;
-          unlinkSync(path: string): void;
-          mkdirSync(path: string, options?: any): void;
-        };
-      `;
-
-      monaco.languages.typescript.javascriptDefaults.addExtraLib(
-        extraLib,
-        'ts:filename/globals.d.ts'
-      );
-
-      // Register completion provider for request and response
-      monaco.languages.registerCompletionItemProvider('javascript', {
-        provideCompletionItems: (model, position) => {
-          const word = model.getWordUntilPosition(position);
-          const range = {
-            startLineNumber: position.lineNumber,
-            endLineNumber: position.lineNumber,
-            startColumn: word.startColumn,
-            endColumn: word.endColumn,
-          };
-
-          const suggestions = [
-            {
-              label: 'response.status',
-              kind: monaco.languages.CompletionItemKind.Method,
-              insertText: 'response.status(${1:200})',
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              documentation: 'Set HTTP response status code',
-              range,
-            },
-            {
-              label: 'response.json',
-              kind: monaco.languages.CompletionItemKind.Method,
-              insertText: 'response.json({\n\t$1\n});',
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              documentation: 'Send JSON response body',
-              range,
-            },
-            {
-              label: 'response.send',
-              kind: monaco.languages.CompletionItemKind.Method,
-              insertText: 'response.send("${1:OK}");',
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              documentation: 'Send text response body',
-              range,
-            },
-            {
-              label: 'request.body',
-              kind: monaco.languages.CompletionItemKind.Property,
-              insertText: 'request.body',
-              documentation: 'Parsed HTTP request body',
-              range,
-            },
-            {
-              label: 'request.query',
-              kind: monaco.languages.CompletionItemKind.Property,
-              insertText: 'request.query',
-              documentation: 'URL query parameters',
-              range,
-            },
-            {
-              label: 'request.headers',
-              kind: monaco.languages.CompletionItemKind.Property,
-              insertText: 'request.headers',
-              documentation: 'HTTP request headers object',
-              range,
-            }
-          ];
-
-          return { suggestions };
-        }
-      });
-    } catch (e) {
-      console.warn('Monaco configuration warning:', e);
-    }
-  };
+  const extensions = [
+    javascript(),
+    autocompletion({ override: [completionSource] }),
+    editorTheme,
+  ];
 
   const copyCode = () => {
     navigator.clipboard.writeText(value);
@@ -218,33 +172,27 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ value, onChange, height 
         </div>
       </div>
 
-      {/* Monaco Editor */}
+      {/* CodeMirror editor */}
       <div className="relative flex-1 min-h-[200px] overflow-hidden" style={{ backgroundColor: colors.bg }}>
-        <Editor
-          height={height}
-          defaultLanguage="javascript"
-          language="javascript"
-          theme={colors.monaco}
+        <CodeMirror
           value={value}
-          onChange={(val) => onChange(val || '')}
-          onMount={handleEditorDidMount}
-          options={{
-            minimap: { enabled: false },
-            fontSize: 13,
-            lineNumbers: 'on',
-            scrollBeyondLastLine: false,
-            automaticLayout: true,
-            tabSize: 2,
-            suggestOnTriggerCharacters: true,
-            quickSuggestions: {
-              other: true,
-              comments: false,
-              strings: true,
-            },
-            formatOnType: true,
-            snippetSuggestions: 'top',
-            wordWrap: 'on',
+          height={height}
+          theme={theme === 'light' ? undefined : oneDark}
+          extensions={extensions}
+          basicSetup={{
+            lineNumbers: true,
+            highlightActiveLineGutter: true,
+            highlightActiveLine: true,
+            foldGutter: false,
+            autocompletion: false,
+            bracketMatching: true,
+            closeBrackets: true,
+            indentOnInput: true,
+            highlightSelectionMatches: true,
+            searchKeymap: false,
           }}
+          onChange={(val) => onChange(val)}
+          style={{ height: '100%' }}
         />
       </div>
     </div>

@@ -53,10 +53,10 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
 
   const alignClass =
     dropdownAlign === 'right'
-      ? 'right-0 left-auto min-w-[240px] max-w-[380px]'
+      ? 'right-0 left-auto min-w-[240px] max-w-[min(380px,calc(100vw-2.5rem))]'
       : dropdownAlign === 'left'
-      ? 'left-0 right-auto min-w-[240px] max-w-[380px]'
-      : 'left-0 right-0 min-w-[140px]';
+      ? 'left-0 right-auto min-w-[240px] max-w-[min(380px,calc(100vw-2.5rem))]'
+      : 'left-0 right-0 min-w-[140px] max-w-[min(380px,calc(100vw-2.5rem))]';
 
   return (
     <div ref={containerRef} className={`relative inline-block text-left ${className}`}>

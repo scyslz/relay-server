@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { X, CheckCircle2, AlertTriangle, Sparkles, Shield, Code, Save } from 'lucide-react';
-import { Route, AppConfig, MatchStrategy, HttpMethod, ValidationResult, ThemeMode } from '../types';
+import { X, CheckCircle2, AlertTriangle, Sparkles, Shield, Code, Save, Cpu } from 'lucide-react';
+import { Route, AppConfig, MatchStrategy, HttpMethod, ValidationResult, ThemeMode, RouteEngineKind } from '../types';
 import { THEME_STYLES } from '../theme';
 import { CODE_SNIPPETS } from '../data/defaultData';
 import { CustomSelect } from './CustomSelect';
 import { CodeEditor } from './CodeEditor';
+
+const random5Digits = () => Math.floor(10000 + Math.random() * 90000).toString();
 
 interface RouteEditorModalProps {
   isOpen: boolean;
@@ -31,7 +33,7 @@ export const RouteEditorModal: React.FC<RouteEditorModalProps> = ({
     appId: selectedAppId || apps[0]?.id || '',
     matchTarget: 'path',
     matchStrategy: 'prefix',
-    pathPattern: '/',
+    pathPattern: '/' + random5Digits(),
     hostPattern: '*',
     httpMethods: ['GET', 'ALL'],
     code: `// Route Handler Script
@@ -41,8 +43,8 @@ response.status(200).json({
   timestamp: new Date().toISOString()
 });`,
     enabled: true,
-    ignoreTls: false,
-    priority: 10
+    priority: 10,
+    engine: 'isolatedvm'
   });
 
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
@@ -64,7 +66,8 @@ response.status(200).json({
         hostPattern: route.hostPattern || '*',
         httpMethods: route.httpMethods || ['ALL'],
         code: route.code || `response.status(200).json({ ok: true });`,
-        priority: route.priority ?? 10
+        priority: route.priority ?? 10,
+        engine: (route.engine === 'process' || route.engine === 'isolatedvm') ? route.engine : 'isolatedvm'
       });
     } else {
       setFormData({
@@ -72,7 +75,7 @@ response.status(200).json({
         appId: selectedAppId || apps[0]?.id || '',
         matchTarget: 'path',
         matchStrategy: 'prefix',
-        pathPattern: '/api/endpoint',
+        pathPattern: '/' + random5Digits(),
         hostPattern: '*',
         httpMethods: ['ALL'],
         code: `// Route Handler Script
@@ -82,8 +85,8 @@ response.status(200).json({
   time: new Date().toISOString()
 });`,
         enabled: true,
-        ignoreTls: false,
-        priority: 10
+        priority: 10,
+        engine: 'isolatedvm'
       });
     }
     setValidationResult(null);
@@ -259,44 +262,43 @@ response.status(200).json({
               </div>
             </div>
 
-            {/* Row 2: HTTP Methods & Code Snippets */}
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
-              <div className="flex items-center space-x-1.5">
-                <span className={`${styles.textMuted} text-[11px] font-medium mr-1`}>Methods:</span>
-                {(['ALL', 'GET', 'POST', 'PUT', 'DELETE'] as HttpMethod[]).map(m => {
-                  const isSelected = (formData.httpMethods || []).includes(m);
-                  return (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => handleMethodToggle(m)}
-                      className={`px-2 py-0.5 rounded text-[11px] font-mono font-bold transition-all border ${
-                        isSelected
-                          ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
-                          : `${styles.inputBg} ${styles.textMuted} border ${styles.inputBorder} hover:text-indigo-400`
-                      }`}
-                    >
-                      {m}
-                    </button>
-                  );
-                })}
-              </div>
+            {/* Row 2: HTTP Methods */}
+            <div className="flex items-center flex-wrap gap-1.5 pt-0.5">
+              <span className={`${styles.textMuted} text-[11px] font-medium mr-1`}>Methods:</span>
+              {(['ALL', 'GET', 'POST', 'PUT', 'DELETE'] as HttpMethod[]).map(m => {
+                const isSelected = (formData.httpMethods || []).includes(m);
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => handleMethodToggle(m)}
+                    className={`px-2 py-0.5 rounded text-[11px] font-mono font-bold transition-all border ${
+                      isSelected
+                        ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                        : `${styles.inputBg} ${styles.textMuted} border ${styles.inputBorder} hover:text-indigo-400`
+                    }`}
+                  >
+                    {m}
+                  </button>
+                );
+              })}
+            </div>
 
-              {/* Per-route TLS verification bypass (opt-in, not global) */}
+            {/* Row 3: Behavior switches (Runtime / Presets) */}
+            <div className="flex items-center flex-wrap gap-2 pt-0.5">
+              {/* Per-route execution engine (runtime) selector */}
               <div className="flex items-center space-x-1.5">
-                <button
-                  type="button"
-                  onClick={() => setFormData({ ...formData, ignoreTls: !formData.ignoreTls })}
-                  className={`px-2 py-0.5 rounded text-[11px] font-mono font-bold transition-all border flex items-center gap-1 ${
-                    formData.ignoreTls
-                      ? 'bg-amber-600 text-white border-amber-500 shadow-sm'
-                      : `${styles.inputBg} ${styles.textMuted} border ${styles.inputBorder} hover:text-amber-400`
-                  }`}
-                  title="Skip TLS/SSL certificate verification for this route's outgoing fetch() HTTPS requests"
-                >
-                  <Shield className="w-3 h-3" />
-                  {formData.ignoreTls ? 'Ignore TLS: ON' : 'Ignore TLS: OFF'}
-                </button>
+                <Cpu className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <CustomSelect
+                  value={formData.engine || 'isolatedvm'}
+                  onChange={(val) => setFormData({ ...formData, engine: val as RouteEngineKind })}
+                  options={[
+                    { value: 'isolatedvm', label: 'v8 isolate' },
+                    { value: 'process', label: 'node22' }
+                  ]}
+                  buttonClassName="min-w-[90px] border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300"
+                  theme={theme}
+                />
               </div>
 
               {/* Custom Preset Dropdown */}
@@ -313,7 +315,8 @@ response.status(200).json({
                     value: snip.code,
                     label: snip.title
                   }))}
-                  buttonClassName="text-amber-300 border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 min-w-[110px]"
+                  buttonClassName="text-amber-300 border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 min-w-[90px]"
+                  dropdownClassName="!min-w-[150px] !max-w-[220px]"
                   theme={theme}
                 />
               </div>
