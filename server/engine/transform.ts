@@ -25,7 +25,14 @@ export function transformRouteToModule(code: string): string {
   }
   const imports = stripImportVersions(importBlocks.join('\n'));
   const body = bodyLines.join('\n');
-  return `${imports}\n\nexport default async function run({ request, response, fetch, console, fs }) {\n${body}\n}\n`;
+  // Per-request sandbox params. Route code's free references to
+  // setTimeout/setInterval/clearTimeout/clearInterval/WebSocket resolve against
+  // these destructured names (they are the function params), so the engine can
+  // close each one over the request id and get exact per-request resource
+  // attribution — no shared "active request" marker is needed, which removes
+  // the cross-request attribution race. Codes inside bundled dependencies are
+  // NOT inside this function scope, so they keep resolving to the globals.
+  return `${imports}\n\nexport default async function run({ request, response, fetch, console, fs, setTimeout, setInterval, clearTimeout, clearInterval, WebSocket }) {\n${body}\n}\n`;
 }
 
 export function routeModuleFileName(routeId: string, hash: string): string {

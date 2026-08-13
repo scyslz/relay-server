@@ -65,6 +65,10 @@ export interface EngineOptions {
   // Milliseconds an extra (non-minimum) entry must be idle before it is
   // reclaimed by the auto-shrink timer (default 60s).
   idleMs?: number;
+  // Max requests that may be interleaved on a single worker/isolate at once.
+  // Async routes (fetch/timers/ws) yield their isolate while awaiting, so
+  // several can share one entry; sync routes serialize on it. Default 8.
+  maxConcurrentPerEntry?: number;
 }
 
 export const DEFAULT_ENGINE_OPTIONS: EngineOptions = {
