@@ -1,4 +1,4 @@
-import { Route } from '../src/types';
+import { Route } from '../shared/types';
 import { state } from './state';
 import { findAppById, getSystemApp } from './config';
 import { resolveUrlTemplatesInCode } from './url-templates';

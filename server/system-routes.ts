@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { SYSTEM_ROUTES } from '../src/constants';
+import { SYSTEM_ROUTES } from '../shared/constants';
 import { app } from './state';
 import { getSystemApp } from './config';
 import { checkRouteMatch } from './execution';

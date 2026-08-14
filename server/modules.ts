@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { Route } from '../src/types';
+import { Route } from '../shared/types';
 import { state, ROUTE_MODULES_DIR, ROUTE_SCRIPTS_DIR } from './state';
 
 export function isBareSpecifier(specifier: string): boolean {

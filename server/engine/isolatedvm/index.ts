@@ -3,9 +3,10 @@ import os from 'os';
 import path from 'path';
 import * as crypto from 'crypto';
 import * as fsMod from 'fs';
+import { Socket as NetSocket } from 'net';
 import { WebSocket as WsWebSocket } from 'ws';
-import { Route } from '../../../src/types';
-import { RouteEngine, ExecutionRequest, ExecutionResult, EngineOptions, DEFAULT_ENGINE_OPTIONS } from '../types';
+import { Route } from '../../../shared/types';
+import { RouteEngine, ExecutionRequest, ExecutionResult, EngineOptions, DEFAULT_ENGINE_OPTIONS, BridgeRequest, BridgeDecision } from '../types';
 import { ensureBareImportsInstalled, InstallContext } from '../modules';
 import { bundleRoute } from './bundler';
 import { buildPrelude } from './prelude';
@@ -169,11 +170,55 @@ globalThis.__invoke = async (reqJson, reqId) => {
     error: (...a) => { __hostLog(reqId, 'error', a.map(x => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(' ')); },
     info: (...a) => { __hostLog(reqId, 'info', a.map(x => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(' ')); }
   };
-  const r = await fn({ request, response, fetch, console, fs, setTimeout, setInterval, clearTimeout, clearInterval, WebSocket });
+  // Bridge (inbound proxy) handle: route code calls host.proxy(target, opts)
+  // to tell the engine it wants this request tunneled to an upstream, with
+  // optional path rewriting (path / stripPrefix / replacePrefix) and request
+  // header overrides. Path rewriting happens here in the sandbox (pure string
+  // ops); the host receives the final request URL on the host side.
+  var bridgeTarget = undefined;
+  var rewritePath = (p, opts) => {
+    if (!opts) return p;
+    const orig = p;
+    if (typeof opts.path === 'string' && opts.path.length > 0) return opts.path.startsWith('/') ? opts.path : '/' + opts.path;
+    // replacePrefix: ['/ws', '/api'] — replace the leading source prefix with
+    // the replacement, keeping the remainder. e.g. /ws/1212/chat -> /api/1212/chat
+    if (Array.isArray(opts.replacePrefix) && opts.replacePrefix.length === 2) {
+      const [from, to] = opts.replacePrefix.map(String);
+      if (from.length > 0 && orig.startsWith(from)) {
+        const rest = orig.slice(from.length);
+        return (to && to.length > 0 ? to : '') + rest;
+      }
+      return orig;
+    }
+    if (typeof opts.stripPrefix === 'string' && opts.stripPrefix.length > 0) {
+      return orig.startsWith(opts.stripPrefix)
+        ? (orig.slice(opts.stripPrefix.length) || '/')
+        : orig;
+    }
+    return orig;
+  };
+  var host = {
+    proxy: (target, opts) => {
+      if (target === undefined || target === null || String(target).length === 0) {
+        throw new Error('host.proxy(target[, opts]) requires a non-empty upstream target');
+      }
+      const reqPath = (request.path || '/').split('?')[0] || '/';
+      const query = typeof request.url === 'string' && request.url.includes('?') ? request.url.slice(request.url.indexOf('?')) : '';
+      const upstreamPath = rewritePath(reqPath, opts);
+      let base = String(target);
+      while (base.endsWith('/')) base = base.slice(0, -1);
+      const url = base + upstreamPath + query;
+      bridgeTarget = { target: String(target), url, headers: (opts && opts.headers && typeof opts.headers === 'object') ? opts.headers : undefined };
+      __hostBridgeSet(reqId, JSON.stringify(bridgeTarget));
+      return true;
+    },
+    __target: () => bridgeTarget
+  };
+  const r = await fn({ request, response, fetch, console, fs, setTimeout, setInterval, clearTimeout, clearInterval, WebSocket, host });
   if (r !== undefined) {
     __hostLog(reqId, 'info', 'invoke: route returned type=' + typeof r);
   }
-  return JSON.stringify({ state, result: r });
+  return JSON.stringify({ state, result: r, bridgeTarget });
 };
 `;
 
@@ -204,6 +249,8 @@ interface IsolateEntry {
   fetchOwner: Map<number, number>;
   // persistent context reused across requests (created lazily on first use)
   ctx?: ivm.Context;
+  // per-invocation bridge decision made by route code (reqId -> {target,url,headers})
+  bridgeTargets: Map<number, Record<string, any>>;
   // in-flight context creation (concurrency guard for interleaved first touches)
   ctxPromise?: Promise<ivm.Context>;
   // compiled route bundles, keyed by `${route.id}:${hash}`; a Script is bound
@@ -229,6 +276,9 @@ export class IsolatedVmEngine implements RouteEngine {
   private disposed = false;
   private installCtx: InstallContext;
   private shrinkTimer?: any;
+  // inbound bridge tunnels owned by route ids: connId -> { routeId, close }
+  private bridgeHooks = new Map<number, { routeId: string; close: () => void }>();
+  private nextBridgeId = 1;
 
   constructor(options: EngineOptions = {}) {
     this.opts = { ...DEFAULT_ENGINE_OPTIONS, ...options } as any;
@@ -268,6 +318,7 @@ export class IsolatedVmEngine implements RouteEngine {
       wsOwner: new Map(),
       fetchAbort: new Map(),
       fetchOwner: new Map(),
+      bridgeTargets: new Map(),
       bundleScripts: new Map(),
       logsByReq: new Map(),
       lastUsed: Date.now()
@@ -385,6 +436,7 @@ export class IsolatedVmEngine implements RouteEngine {
     for (const [, ac] of entry.fetchAbort) { try { ac.abort(); } catch {} }
     entry.fetchAbort.clear();
     entry.fetchOwner.clear();
+    entry.bridgeTargets.clear();
     entry.logsByReq.clear();
     entry.bundleScripts.clear();
     entry.ctx = undefined;
@@ -543,6 +595,20 @@ export class IsolatedVmEngine implements RouteEngine {
       (sandboxId: number) => {
         const ws = entry.wsConns?.get(sandboxId);
         if (ws) { try { ws.close(); } catch {} }
+        return 0;
+      }
+    ));
+    // Bridge (inbound proxy) bridge: route code calls host.proxy(target) which
+    // records the decided upstream here, keyed by the invocation reqId, so the
+    // engine can establish the tunnel after the route finishes deciding.
+    ctx.global.setSync('__hostBridgeSet', new ivm.Callback(
+      (reqId: number, targetJson: string) => {
+        try {
+          const parsed = JSON.parse(String(targetJson || '{}'));
+          entry.bridgeTargets.set(reqId, parsed);
+        } catch {
+          entry.bridgeTargets.set(reqId, { target: String(targetJson) });
+        }
         return 0;
       }
     ));
@@ -899,13 +965,170 @@ private runBuiltin(id: string, argsJson: string): any {
     }
   }
 
+  // Run an inbound WS/HTTP upgrade through the route code, letting the route
+  // decide the upstream target (host.proxy). The engine only performs the
+  // decision: the caller establishes the tunnel from the returned target. The
+  // resulting tunnel should be registered via registerBridge so it can be torn
+  // down when the route is updated/deleted or the engine is disposed.
+  async executeBridge(route: Route, reqInfo: BridgeRequest): Promise<BridgeDecision> {
+    const start = Date.now();
+    let bundle: string;
+    let hash: string;
+    try {
+      const got = await this.getBundle(route);
+      bundle = got.bundle;
+      hash = got.hash;
+    } catch (e: any) {
+      return {
+        proxied: false,
+        statusCode: 500,
+        responseHeaders: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'Script Execution Exception Isolated', routeId: route.id, message: e.message }, null, 2)
+      };
+    }
+
+    const entry = await this.pick();
+    const reqId = this.nextReqId++;
+    entry.lastUsed = Date.now();
+    const logs: string[] = [];
+    entry.logsByReq.set(reqId, logs);
+    try {
+      const ctx = await this.ensureContext(entry);
+      const key = `${route.id}:${hash}`;
+      let bundleScript = entry.bundleScripts.get(key);
+      if (!bundleScript) {
+        bundleScript = await entry.iso.compileScript(this.wrapBundleCode(bundle));
+        entry.bundleScripts.set(key, bundleScript);
+      }
+      bundleScript.runSync(ctx);
+      const invoke = ctx.global.getSync('__invoke', { reference: true });
+
+      const execPromise = invoke.apply(undefined, [JSON.stringify(reqInfo), reqId], {
+        arguments: { copy: true },
+        result: { promise: true }
+      }) as Promise<unknown>;
+
+      let timedOut = false;
+      let timeoutHandle: NodeJS.Timeout | undefined;
+      const result = await Promise.race([
+        execPromise.catch((e: Error) => ({ __sandboxError: e })),
+        new Promise<{ __sandboxError: Error }>((resolve) => {
+          timeoutHandle = setTimeout(() => { timedOut = true; resolve({ __sandboxError: new Error(`bridge execution timeout after ${this.opts.timeoutMs}ms`) }); }, this.opts.timeoutMs);
+        })
+      ]) as { __sandboxError?: Error; state?: any; bridgeTarget?: any } | string;
+
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+
+      if (timedOut) {
+        entry.dirty = true;
+        throw new Error(`bridge execution timeout after ${this.opts.timeoutMs}ms`);
+      }
+      if (result && typeof result === 'object' && result.__sandboxError) {
+        throw result.__sandboxError;
+      }
+
+      let targetRaw: any;
+      if (typeof result === 'object' && result !== null) {
+        targetRaw = entry.bridgeTargets.get(reqId) || (result as any).bridgeTarget;
+      } else {
+        const parsed = JSON.parse(result as string);
+        targetRaw = entry.bridgeTargets.get(reqId) || parsed.bridgeTarget;
+      }
+      entry.bridgeTargets.delete(reqId);
+
+      const decision = this.normalizeBridgeDecision(targetRaw);
+      if (decision.proxied) {
+        return decision;
+      }
+      const state = (result as any)?.state || { status: 502, responseHeaders: {}, body: null };
+      return {
+        proxied: false,
+        statusCode: state.status || 502,
+        responseHeaders: state.responseHeaders || state.headers || { 'Content-Type': 'application/json' },
+        body: state.body !== null ? state.body : JSON.stringify({ error: 'Route refused to proxy this connection' })
+      };
+    } catch (err: any) {
+      logs.push(`[ERROR] Bridge Route exception: ${err.message}`);
+      const msg = String(err && err.message);
+      if (/memory|out of memory|isolate|disposed|terminated/i.test(msg)) {
+        entry.dirty = true;
+      }
+      return {
+        proxied: false,
+        statusCode: 502,
+        responseHeaders: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'Bridge Execution Exception', routeId: route.id, message: err.message, stack: String((err as any).stack || '') }, null, 2)
+      };
+    } finally {
+      entry.bridgeTargets.delete(reqId);
+      this.clearTimers(entry, reqId);
+      this.clearWs(entry, reqId);
+      this.clearFetch(entry, reqId);
+      entry.logsByReq.delete(reqId);
+      entry.active--;
+      if (entry.active === 0 && entry.dirty) {
+        this.recycleEntry(entry);
+      }
+    }
+  }
+
+  // Tolerate the three shapes a route may produce via host.proxy:
+  //   'ws://host:port'                     -> no rewrite
+  //   { target: '...' }                     -> no rewrite
+  //   { target, url, requestHeaders }       -> rewritten path + headers
+  private normalizeBridgeDecision(raw: any): BridgeDecision {
+    if (typeof raw === 'string' && raw.length > 0) {
+      return { proxied: true, target: raw, url: raw };
+    }
+    if (raw && typeof raw === 'object') {
+      const target = typeof raw.target === 'string' ? raw.target : undefined;
+      if (target && target.length > 0) {
+        const url = typeof raw.url === 'string' && raw.url.length > 0 ? raw.url : target;
+        const requestHeaders = raw.headers && typeof raw.headers === 'object' ? raw.headers : undefined;
+        return { proxied: true, target, url, requestHeaders };
+      }
+    }
+    return { proxied: false };
+  }
+
+  // Register an established bridge tunnel under its owning route so lifecycle
+  // management (route update/delete/disable, engine dispose) can tear it down.
+  registerBridge(routeId: string, close: () => void): number {
+    const id = this.nextBridgeId++;
+    this.bridgeHooks.set(id, { routeId, close });
+    return id;
+  }
+
+  unregisterBridge(id: number): void {
+    this.bridgeHooks.delete(id);
+  }
+
+  disconnectRoutes(routeIds: Set<string>): void {
+    let closed = 0;
+    for (const [id, hook] of Array.from(this.bridgeHooks.entries())) {
+      if (routeIds.has(hook.routeId)) {
+        try { hook.close(); } catch { /* ignore */ }
+        this.bridgeHooks.delete(id);
+        closed++;
+      }
+    }
+    if (closed > 0) {
+      console.log(`[IsolatedVM] Disconnected ${closed} bridge tunnel(s) for route update/delete (${Array.from(routeIds).join(',')})`);
+    }
+  }
+
   async dispose(): Promise<void> {
     this.disposed = true;
     if (this.shrinkTimer) { clearInterval(this.shrinkTimer); this.shrinkTimer = null; }
+    for (const [, hook] of this.bridgeHooks) {
+      try { hook.close(); } catch { /* ignore */ }
+    }
+    this.bridgeHooks.clear();
     for (const e of this.pool) {
       this.clearTimers(e);
       this.clearWs(e);
       this.clearFetch(e);
+      e.bridgeTargets.clear();
       e.bundleScripts.clear();
       try { e.ctx?.release(); } catch {}
       try { e.iso.dispose(); } catch {}

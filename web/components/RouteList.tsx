@@ -1,5 +1,5 @@
 import React from 'react';
-import { Route, AppConfig, ThemeMode } from '../types';
+import { Route, AppConfig, ThemeMode } from '../../shared/types';
 import { Waypoints, Code, Play, Shield, Trash2, CheckCircle2, AlertCircle, Plus, Search, HelpCircle, ChevronDown, ChevronRight, Copy, Check } from 'lucide-react';
 import { THEME_STYLES } from '../theme';
 import { highlightJS } from '../utils/syntaxHighlight';

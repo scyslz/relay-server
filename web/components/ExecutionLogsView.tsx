@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Terminal, Trash2, Search, Filter, ShieldAlert, ChevronDown, ChevronRight } from 'lucide-react';
-import { ExecutionLog, ThemeMode } from '../types';
+import { ExecutionLog, ThemeMode } from '../../shared/types';
 import { THEME_STYLES } from '../theme';
 
 interface ExecutionLogsViewProps {

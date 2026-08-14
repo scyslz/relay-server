@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { AppConfig, Route, ExecutionLog } from '../src/types';
+import { AppConfig, Route, ExecutionLog } from '../shared/types';
 import { state } from './state';
 import { getSystemApp } from './config';
 import { pushExecutionLog } from './logs';

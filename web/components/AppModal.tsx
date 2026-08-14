@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Server, AlertTriangle, Save, Network, Globe } from 'lucide-react';
-import { AppConfig, ValidationResult, ThemeMode } from '../types';
+import { AppConfig, ValidationResult, ThemeMode } from '../../shared/types';
 import { THEME_STYLES } from '../theme';
 
 interface AppModalProps {

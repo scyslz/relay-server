@@ -18,6 +18,10 @@ export interface Route {
   matchStrategy: MatchStrategy;
   pathPattern: string;
   hostPattern?: string;
+  // When set ("http://host:port"), this route acts as a host-based reverse
+  // proxy: requests whose Host matches hostPattern are streamed to proxyTarget
+  // (HTTP + WebSocket passthrough) instead of executing `code`.
+  proxyTarget?: string;
   httpMethods: HttpMethod[];
   code: string;
   enabled: boolean;
@@ -92,6 +96,14 @@ export interface ValidationResult {
   valid: boolean;
   errors: ValidationIssue[];
   warnings: ValidationIssue[];
+}
+
+export interface CodeTemplate {
+  title: string;
+  description: string;
+  universal: boolean;
+  dependency?: string;
+  code: string;
 }
 
 export interface TestRequestPayload {

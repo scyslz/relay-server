@@ -1,6 +1,6 @@
 import React from 'react';
 import { Shield, Server, Edit3, Trash2, Globe, Plus, Network, Layers } from 'lucide-react';
-import { AppConfig, Route, ThemeMode } from '../types';
+import { AppConfig, Route, ThemeMode } from '../../shared/types';
 import { THEME_STYLES } from '../theme';
 
 interface AppListProps {

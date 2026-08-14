@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
-import { AppConfig, Route, ServerConfig } from '../src/types';
-import { INITIAL_PRESET_APPS, INITIAL_PRESET_ROUTES } from '../src/data/defaultData';
-import { SYSTEM_APP, SYSTEM_APP_ID, SYSTEM_ROUTES, DEFAULT_SERVER_CONFIG } from '../src/constants';
+import { AppConfig, Route, ServerConfig } from '../shared/types';
+import { INITIAL_PRESET_APPS, INITIAL_PRESET_ROUTES } from '../shared/data';
+import { SYSTEM_APP, SYSTEM_APP_ID, SYSTEM_ROUTES, DEFAULT_SERVER_CONFIG } from '../shared/constants';
 import { state, CONFIG_FILE_PATH } from './state';
 
 export function presetUserApps(): AppConfig[] {

@@ -1,5 +1,5 @@
 import os from 'os';
-import { Route } from '../src/types';
+import { Route } from '../shared/types';
 import { createEngine, EngineKind, RouteEngine } from './engine';
 import { state, ROUTE_MODULES_DIR, ROUTE_SCRIPTS_DIR, AUTO_INSTALL_ENABLED } from './state';
 
@@ -86,5 +86,18 @@ export async function disposeSecondary(): Promise<void> {
     }
     state.secondaryEngine = null;
     state.secondaryEngineKind = null;
+  }
+}
+
+// Tear down bridge tunnels owned by the given route ids across both engines.
+// Called after route add/update/delete/disable so that "route changed" means
+// "existing bridged connections to the real network are dropped".
+export function disconnectBridgeRoutes(routeIds: Set<string>): void {
+  if (!routeIds || routeIds.size === 0) return;
+  if (state.activeEngine && typeof (state.activeEngine as any).disconnectRoutes === 'function') {
+    try { (state.activeEngine as any).disconnectRoutes(routeIds); } catch (err: any) { console.error('[Engine] disconnectRoutes error:', err?.message); }
+  }
+  if (state.secondaryEngine && typeof (state.secondaryEngine as any).disconnectRoutes === 'function') {
+    try { (state.secondaryEngine as any).disconnectRoutes(routeIds); } catch (err: any) { console.error('[Engine] disconnectRoutes error:', err?.message); }
   }
 }

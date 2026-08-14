@@ -5,8 +5,8 @@ import fs from 'fs';
 import { generate as generateSelfSignedCert } from 'selfsigned';
 import { Server as HttpServer } from 'http';
 import { createServer as createNetServer, createConnection as netCreateConnection, Server as NetServer, Socket as NetSocket } from 'net';
-import { AppConfig, ServerConfig } from '../src/types';
-import { SYSTEM_APP_ID } from '../src/constants';
+import { AppConfig, ServerConfig } from '../shared/types';
+import { SYSTEM_APP_ID } from '../shared/constants';
 import { app, state, CRT_DIR, CRT_KEY_PATH, CRT_CERT_PATH } from './state';
 import { handleAppRequest } from './gateway';
 

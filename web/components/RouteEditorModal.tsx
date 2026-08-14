@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, CheckCircle2, AlertTriangle, Sparkles, Shield, Code, Save, Cpu } from 'lucide-react';
-import { Route, AppConfig, MatchStrategy, HttpMethod, ValidationResult, ThemeMode, RouteEngineKind } from '../types';
+import { Route, AppConfig, MatchStrategy, HttpMethod, ValidationResult, ThemeMode, RouteEngineKind, CodeTemplate } from '../../shared/types';
 import { THEME_STYLES } from '../theme';
-import { CODE_SNIPPETS } from '../data/defaultData';
 import { CustomSelect } from './CustomSelect';
 import { CodeEditor } from './CodeEditor';
 
@@ -50,8 +49,23 @@ response.status(200).json({
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [codeTemplates, setCodeTemplates] = useState<CodeTemplate[]>([]);
 
   const routeId = route?.id;
+
+  const engine = formData.engine || 'isolatedvm';
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    fetch(`/internal/templates?engine=${encodeURIComponent(engine)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (!cancelled && Array.isArray(data?.templates)) setCodeTemplates(data.templates);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isOpen, engine]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -311,9 +325,11 @@ response.status(200).json({
                   onChange={(val) => {
                     if (val) applyCodeSnippet(val);
                   }}
-                  options={CODE_SNIPPETS.map(snip => ({
+                  options={codeTemplates.map(snip => ({
                     value: snip.code,
-                    label: snip.title
+                    label: snip.title,
+                    subtitle: snip.universal ? undefined : snip.dependency,
+                    badge: snip.universal ? 'universal' : 'dependent'
                   }))}
                   buttonClassName="text-amber-300 border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 min-w-[90px]"
                   dropdownClassName="!min-w-[150px] !max-w-[220px]"

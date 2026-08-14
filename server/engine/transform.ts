@@ -32,7 +32,7 @@ export function transformRouteToModule(code: string): string {
   // attribution — no shared "active request" marker is needed, which removes
   // the cross-request attribution race. Codes inside bundled dependencies are
   // NOT inside this function scope, so they keep resolving to the globals.
-  return `${imports}\n\nexport default async function run({ request, response, fetch, console, fs, setTimeout, setInterval, clearTimeout, clearInterval, WebSocket }) {\n${body}\n}\n`;
+  return `${imports}\n\nexport default async function run({ request, response, fetch, console, fs, setTimeout, setInterval, clearTimeout, clearInterval, WebSocket, host }) {\n${body}\n}\n`;
 }
 
 export function routeModuleFileName(routeId: string, hash: string): string {

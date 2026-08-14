@@ -1,9 +1,9 @@
 import { isIP as netIsIP } from 'net';
-import { AppConfig, Route, ValidationIssue, ValidationResult } from '../src/types';
+import { AppConfig, Route, ValidationIssue, ValidationResult } from '../shared/types';
 import { state } from './state';
 import { findAppById } from './config';
 import { validateUrlTemplatesInCode } from './url-templates';
-import { SYSTEM_APP_ID } from '../src/constants';
+import { SYSTEM_APP_ID } from '../shared/constants';
 
 export function validateJavaScriptSyntax(code: string): { valid: boolean; error?: string; line?: number } {
   try {

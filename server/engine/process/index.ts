@@ -3,7 +3,7 @@ import path from 'path';
 import os from 'os';
 import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
-import { Route } from '../../../src/types';
+import { Route } from '../../../shared/types';
 import { RouteEngine, ExecutionRequest, ExecutionResult, EngineOptions, DEFAULT_ENGINE_OPTIONS } from '../types';
 import { transformRouteToModule, routeModuleFileName } from '../transform';
 import { ensureBareImportsInstalled, resolveBundledImport } from '../modules';

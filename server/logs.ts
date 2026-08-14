@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { ExecutionLog } from '../src/types';
+import { ExecutionLog } from '../shared/types';
 import { state, LOG_FILE_PATH, MAX_LOG_ENTRIES, MAX_LOG_FILE_BYTES } from './state';
 
 export function estimateLogEntryBytes(entry: ExecutionLog): number {

@@ -1,13 +1,15 @@
 import { Request, Response } from 'express';
 import fs from 'fs';
-import { AppConfig, Route, ServerConfig, ExecutionLog, TestRequestPayload, TestResponsePayload } from '../src/types';
-import { SYSTEM_APP_ID, SYSTEM_ROUTES } from '../src/constants';
+import { AppConfig, Route, ServerConfig, ExecutionLog, TestRequestPayload, TestResponsePayload } from '../shared/types';
+import { SYSTEM_APP_ID, SYSTEM_ROUTES } from '../shared/constants';
 import { app, state, CONFIG_FILE_PATH, MAX_LOG_ENTRIES, DEFAULT_LOGS_LIMIT } from './state';
 import { ensureDefaultAppAndRoutes, saveConfigToDisk, getSystemApp } from './config';
 import { pushExecutionLog, persistLogsToDisk } from './logs';
 import { validateAppConfig, validateRouteConfig } from './validation';
 import { checkRouteMatch, executeRouteScript } from './execution';
 import { rebindAllAppListeners, reListenServer, getAppListenStatus } from './listeners';
+import { disconnectBridgeRoutes } from './engine-manager';
+import { listCodeTemplates } from './templates';
 
 export function registerAdminRoutes() {
   app.get('/internal/apps', (_req: Request, res: Response) => {
@@ -147,12 +149,14 @@ export function registerAdminRoutes() {
       return;
     }
 
+    const removedRouteIds = state.routesStore.filter(r => r.appId === id).map(r => r.id);
     state.appsStore = state.appsStore.filter(a => a.id !== id);
     state.routesStore = state.routesStore.filter(r => r.appId !== id);
 
     ensureDefaultAppAndRoutes();
     saveConfigToDisk();
     rebindAllAppListeners();
+    disconnectBridgeRoutes(new Set(removedRouteIds));
     res.json({ success: true, deletedId: id });
   });
 
@@ -246,6 +250,9 @@ export function registerAdminRoutes() {
     state.routesStore[existingIndex] = updatedRoute;
     ensureDefaultAppAndRoutes();
     saveConfigToDisk();
+    // Route code/target changed: any bridge tunnels it owned must be re-decided
+    // by the (updated) route on the next request, so drop them now.
+    disconnectBridgeRoutes(new Set([existingRoute.id]));
     res.json({ route: updatedRoute, validation });
   });
 
@@ -266,6 +273,7 @@ export function registerAdminRoutes() {
     state.routesStore = state.routesStore.filter(r => r.id !== id);
     ensureDefaultAppAndRoutes();
     saveConfigToDisk();
+    disconnectBridgeRoutes(new Set([id]));
     res.json({ success: true, deletedId: id });
   });
 
@@ -403,6 +411,12 @@ export function registerAdminRoutes() {
     state.executionLogs = [];
     persistLogsToDisk();
     res.json({ success: true });
+  });
+
+  app.get('/internal/templates', (req: Request, res: Response) => {
+    const engine = typeof req.query.engine === 'string' ? req.query.engine : undefined;
+    const templates = listCodeTemplates(engine);
+    res.json({ engine: engine || 'isolatedvm', templates, count: templates.length });
   });
 
   app.get('/internal/config', (_req: Request, res: Response) => {

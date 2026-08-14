@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Check } from 'lucide-react';
-import { ThemeMode } from '../types';
+import { ThemeMode } from '../../shared/types';
 import { THEME_STYLES } from '../theme';
 
 export interface SelectOption {

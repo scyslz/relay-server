@@ -1,5 +1,5 @@
 import React from 'react';
-import { ThemeMode } from '../types';
+import { ThemeMode } from '../../shared/types';
 
 /**
  * Syntax color palette per theme.

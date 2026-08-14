@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlertTriangle, Trash2, X } from 'lucide-react';
-import { ThemeMode } from '../types';
+import { ThemeMode } from '../../shared/types';
 import { THEME_STYLES } from '../theme';
 
 interface ConfirmModalProps {

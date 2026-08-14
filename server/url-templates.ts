@@ -1,4 +1,4 @@
-import { AppConfig, Route } from '../src/types';
+import { AppConfig, Route } from '../shared/types';
 import { findAppByName, findAppById, findRouteByName, getSystemApp } from './config';
 
 const URL_TEMPLATE_RE = /\$\{([^{}]*)\}/g;

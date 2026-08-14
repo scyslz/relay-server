@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Play, Clock, Terminal, Send, Sparkles } from 'lucide-react';
-import { AppConfig, Route, TestResponsePayload, ThemeMode } from '../types';
+import { AppConfig, Route, TestResponsePayload, ThemeMode } from '../../shared/types';
 import { THEME_STYLES } from '../theme';
 import { CustomSelect } from './CustomSelect';
 

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Server, ShieldCheck, ListFilter, Terminal, Sun, Moon, Palette, ChevronDown } from 'lucide-react';
-import { AppConfig, Route, ThemeMode } from '../types';
+import { AppConfig, Route, ThemeMode } from '../../shared/types';
 import { THEME_STYLES } from '../theme';
 
 interface NavbarProps {

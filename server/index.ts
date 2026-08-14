@@ -2,7 +2,7 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import express, { Request, Response } from 'express';
-import { SYSTEM_ROUTES } from '../src/constants';
+import { SYSTEM_ROUTES } from '../shared/constants';
 import { createEngine } from './engine';
 import { app, state, ROUTE_MODULES_DIR, ROUTE_SCRIPTS_DIR, AUTO_INSTALL_ENABLED, ROUTE_MODULE_CLEAN_INTERVAL_MS } from './state';
 import { loadConfigFromDisk, ensureDefaultAppAndRoutes, saveConfigToDisk, findAppById, getSystemApp } from './config';
@@ -14,6 +14,7 @@ import { rebindAllAppListeners } from './listeners';
 import { registerAdminRoutes } from './admin-api';
 import { registerSystemRoutes } from './system-routes';
 import { disposeSecondary, resolveEngineKind } from './engine-manager';
+import { attachUpgradeBridge } from './upgrade-proxy';
 
 async function warmRouteModules(): Promise<void> {
   const routes = state.routesStore.filter((r) => r.enabled && r.code);
@@ -89,6 +90,7 @@ async function startServer() {
   state.httpServer = app.listen(state.serverConfig.listenPort, state.serverConfig.listenHost, () => {
     console.log(`Relay Server & Web Hub listening on http://${state.serverConfig.listenHost}:${state.serverConfig.listenPort}`);
   });
+  attachUpgradeBridge(state.httpServer);
 
   try {
     const engineKind = (process.env.RELAY_ENGINE === 'process' ? 'process' : 'isolatedvm');

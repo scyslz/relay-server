@@ -1,4 +1,4 @@
-import { Route, ExecutionLog } from '../../src/types';
+import { Route, ExecutionLog } from '../../shared/types';
 
 // Sandbox parameters injected into every route script, mirroring the
 // documented route API: request / response / fetch / console / fs.
@@ -32,10 +32,56 @@ export interface ExecutionResult {
   durationMs: number;
 }
 
+// Inbound connection bridge. A WS upgrade (or streamable HTTP) request runs
+// through the route; the route decides the upstream target (host.proxy), the
+// engine then establishes the real connection and tunnels bytes both ways.
+// Lifecycle: connections are registered under the owning route id and are torn
+// down when the route is updated/deleted/disabled (disconnectRoutes) or when
+// the engine reclaims its resources (dispose / entry recycle).
+export interface BridgeRequest {
+  method: string;
+  url: string;
+  path: string;
+  query: Record<string, any>;
+  headers: Record<string, string>;
+  host: string;
+  ip: string;
+  params: Record<string, string>;
+}
+
+export interface BridgeDecision {
+  // Route called host.proxy(target): hand the connection to the engine.
+  proxied: boolean;
+  // Upstream to tunnel to (scheme://host:port), unchanged from host.proxy.
+  target?: string;
+  // Full upstream URL to request (target + rewritten path). When set, the
+  // tunnel uses this instead of target + original path.
+  url?: string;
+  // Request headers to send upstream (host.proxy headers, merged over the
+  // inbound request's headers).
+  requestHeaders?: Record<string, string>;
+  // When the route did not proxy, it produced a normal response instead.
+  statusCode?: number;
+  responseHeaders?: Record<string, string>;
+  body?: any;
+}
+
 export interface RouteEngine {
   readonly name: 'process' | 'isolatedvm';
   // Execute one route against one request.
   execute(route: Route, reqInfo: ExecutionRequest): Promise<ExecutionResult>;
+  // Run an inbound WS/HTTP upgrade through the route code. The engine decides
+  // whether to tunnel (host.proxy) or respond normally. Optional: engines that
+  // cannot bridge (process) leave it undefined; the caller falls back to a 404.
+  executeBridge?(route: Route, reqInfo: BridgeRequest): Promise<BridgeDecision>;
+  // Register an established bridge tunnel under its owning route id so it can
+  // be closed on route lifecycle changes. Returns a connection id used by
+  // unregisterBridge when the tunnel closes naturally.
+  registerBridge?(routeId: string, close: () => void): number;
+  unregisterBridge?(bridgeId: number): void;
+  // Tear down every bridge connection owned by the given route ids. Called
+  // when routes are updated, disabled or deleted.
+  disconnectRoutes?(routeIds: Set<string>): void;
   // Pre-import / validate a route at startup or save time (fail fast).
   warmUp?(route: Route): Promise<void>;
   // Release all resources (called on server shutdown / engine swap).

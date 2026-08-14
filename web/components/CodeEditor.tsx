@@ -5,7 +5,7 @@ import { oneDark } from '@codemirror/theme-one-dark';
 import { autocompletion, Completion, CompletionContext } from '@codemirror/autocomplete';
 import { EditorView } from '@codemirror/view';
 import { Code, Copy, Check, Sparkles } from 'lucide-react';
-import { ThemeMode } from '../types';
+import { ThemeMode } from '../../shared/types';
 
 interface CodeEditorProps {
   value: string;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AppConfig, Route, ExecutionLog, ValidationResult, ThemeMode } from './types';
+import { AppConfig, Route, ExecutionLog, ValidationResult, ThemeMode } from '../shared/types';
 import { THEME_STYLES } from './theme';
 import { Navbar } from './components/Navbar';
 import { AppList } from './components/AppList';

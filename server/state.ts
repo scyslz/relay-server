@@ -2,11 +2,17 @@ import express from 'express';
 import path from 'path';
 import { Server as HttpServer } from 'http';
 import { Server as NetServer } from 'net';
-import { AppConfig, ServerConfig, Route, ExecutionLog } from '../src/types';
-import { DEFAULT_SERVER_CONFIG } from '../src/constants';
+import { AppConfig, ServerConfig, Route, ExecutionLog } from '../shared/types';
+import { DEFAULT_SERVER_CONFIG } from '../shared/constants';
+import { hostProxyMiddleware, loadHostProxyConfig } from './host-proxy';
 
 export const app = express();
 
+loadHostProxyConfig();
+
+// Domain-based reverse proxy must run before body parsers so request bodies
+// can be streamed through untouched (express.json would consume them first).
+app.use(hostProxyMiddleware);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
