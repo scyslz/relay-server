@@ -16,11 +16,13 @@ RUN npm run build
 FROM node:20-alpine AS deps
 WORKDIR /deps
 # Runtime deps must cover every external import of dist/server.cjs
-# (express, selfsigned, undici, isolated-vm, ws, esbuild). NOTE: esbuild needs
-# its platform binary (an OPTIONAL dep), so do NOT pass --omit=optional here.
+# (express, selfsigned, undici, isolated-vm, ws). esbuild is intentionally NOT
+# installed here: its postinstall runs the binary, which crashes under QEMU
+# (arm64) with "Illegal instruction". bundler.ts loads esbuild lazily so a
+# missing esbuild never blocks boot.
 RUN apk add --no-cache --virtual .build-deps python3 make g++ \
     && npm init -y >/dev/null \
-    && npm install --omit=dev --no-audit --no-fund express@4.21.2 selfsigned@2.4.1 undici@7.29.0 isolated-vm@5.0.4 ws@8.18.0 esbuild@0.25.12 \
+    && npm install --omit=dev --omit=optional --no-audit --no-fund express@4.21.2 selfsigned@2.4.1 undici@7.29.0 isolated-vm@5.0.4 ws@8.18.0 \
     && npm cache clean --force \
     && apk del .build-deps
 
