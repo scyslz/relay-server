@@ -23,10 +23,6 @@ services:
       # Log detail: set to "false" to store only summary records (no route-script
       # console output / stack traces) — keeps the log file small under heavy load.
       - RELAY_LOG_DETAIL=${RELAY_LOG_DETAIL:-true}
-      # Execution engine: isolatedvm needs V8 Isolate (SIGSEGV on hosts that
-      # block PROT_EXEC JIT, e.g. restricted ARM VPS) — process is the safe
-      # default there. Override with RELAY_ENGINE=isolatedvm if your host allows it.
-      - RELAY_ENGINE=${RELAY_ENGINE:-process}
     mem_limit: 512m
     ports:
       - "${RELAY_PORT:-3000}:${RELAY_PORT:-3000}"
