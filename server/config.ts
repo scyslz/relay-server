@@ -59,34 +59,42 @@ export function loadConfigFromDisk() {
       const raw = fs.readFileSync(CONFIG_FILE_PATH, 'utf-8');
       const parsed = JSON.parse(raw);
 
-      if (parsed.server && typeof parsed.server === 'object') {
-        if (typeof parsed.server.name === 'string' && parsed.server.name.trim()) {
-          state.serverConfig.name = parsed.server.name.trim();
+      if (parsed && typeof parsed === 'object') {
+        if (parsed.server && typeof parsed.server === 'object') {
+          if (typeof parsed.server.name === 'string' && parsed.server.name.trim()) {
+            state.serverConfig.name = parsed.server.name.trim();
+          }
+          if (typeof parsed.server.basePath === 'string' && parsed.server.basePath.trim().startsWith('/')) {
+            state.serverConfig.basePath = parsed.server.basePath.trim();
+          }
+          if (typeof parsed.server.listenHost === 'string' && parsed.server.listenHost.trim()) {
+            state.serverConfig.listenHost = parsed.server.listenHost.trim();
+          }
+          const port = Number(parsed.server.listenPort);
+          if (Number.isInteger(port) && port > 0 && port <= 65535) {
+            state.serverConfig.listenPort = port;
+          }
         }
-        if (typeof parsed.server.basePath === 'string' && parsed.server.basePath.trim().startsWith('/')) {
-          state.serverConfig.basePath = parsed.server.basePath.trim();
-        }
-        if (typeof parsed.server.listenHost === 'string' && parsed.server.listenHost.trim()) {
-          state.serverConfig.listenHost = parsed.server.listenHost.trim();
-        }
-        const port = Number(parsed.server.listenPort);
-        if (Number.isInteger(port) && port > 0 && port <= 65535) {
-          state.serverConfig.listenPort = port;
-        }
-      }
 
-      state.appsStore = Array.isArray(parsed.apps)
-        ? parsed.apps.filter((a: AppConfig) => a.id !== SYSTEM_APP_ID && !a.isDefault)
-        : presetUserApps();
-      state.routesStore = Array.isArray(parsed.routes)
-        ? parsed.routes
-            .filter((r: Route) => !r.isDefault)
-            .map((r: Route) => ({
-              ...r,
-              pathPattern: normalizeRoutePattern(r.pathPattern),
-              engine: (r.engine === 'process' || r.engine === 'isolatedvm') ? r.engine : 'isolatedvm'
-            }))
-        : presetUserRoutes();
+        // Compat: old/broken config files must never prevent boot. Every
+        // entry is sanitized with defaults; malformed entries are skipped
+        // with a warning instead of throwing later in gateway/listeners.
+        state.appsStore = Array.isArray(parsed.apps)
+          ? parsed.apps
+            .filter((a: any) => a && typeof a === 'object' && a.id !== SYSTEM_APP_ID && !a.isDefault)
+            .map((a: any) => sanitizeAppConfig(a))
+            .filter((a: AppConfig | null): a is AppConfig => a !== null)
+          : presetUserApps();
+        state.routesStore = Array.isArray(parsed.routes)
+          ? parsed.routes
+            .filter((r: any) => r && typeof r === 'object' && !r.isDefault)
+            .map((r: any) => sanitizeRouteConfig(r))
+            .filter((r: Route | null): r is Route => r !== null)
+          : presetUserRoutes();
+      } else {
+        state.appsStore = presetUserApps();
+        state.routesStore = presetUserRoutes();
+      }
 
       console.log(`[Config Persistence] Successfully loaded configuration from ${CONFIG_FILE_PATH}`);
     } else {
@@ -97,6 +105,88 @@ export function loadConfigFromDisk() {
     console.error('[Config Persistence] Error loading configuration file, using preset fallback:', err);
     state.appsStore = presetUserApps();
     state.routesStore = presetUserRoutes();
+  }
+}
+
+// Fill missing fields with safe defaults so configs written by older
+// versions (or hand-edited) keep working. Returns null when the entry is
+// beyond repair and should be skipped.
+function sanitizeAppConfig(a: any): AppConfig | null {
+  try {
+    if (!a.id || typeof a.id !== 'string') return null;
+    if (!a.name || typeof a.name !== 'string' || !a.name.trim()) return null;
+    const port = Number(a.listenPort);
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+      console.error(`[Config Persistence] Skipping app "${a.name}" (${a.id}): invalid listenPort "${a.listenPort}"`);
+      return null;
+    }
+    const protocols = Array.isArray(a.protocols)
+      ? a.protocols.filter((p: any) => p === 'http' || p === 'https')
+      : ['http'];
+    return {
+      id: a.id,
+      name: a.name.trim(),
+      description: typeof a.description === 'string' ? a.description : '',
+      listenHost: typeof a.listenHost === 'string' && a.listenHost.trim() ? a.listenHost.trim() : '0.0.0.0',
+      listenPort: port,
+      basePath: typeof a.basePath === 'string' && a.basePath.startsWith('/') ? a.basePath : '/',
+      protocols: protocols.length ? protocols : ['http'],
+      enabled: a.enabled !== false,
+      isDefault: false,
+      createdAt: typeof a.createdAt === 'string' ? a.createdAt : new Date().toISOString(),
+      updatedAt: typeof a.updatedAt === 'string' ? a.updatedAt : new Date().toISOString()
+    };
+  } catch (err: any) {
+    console.error(`[Config Persistence] Skipping malformed app entry: ${err?.message || err}`);
+    return null;
+  }
+}
+
+function sanitizeRouteConfig(r: any): Route | null {
+  try {
+    if (!r.id || typeof r.id !== 'string') return null;
+    if (!r.name || typeof r.name !== 'string' || !r.name.trim()) return null;
+    if (!r.appId || typeof r.appId !== 'string') return null;
+    if (typeof r.pathPattern !== 'string' || !r.pathPattern.trim()) {
+      console.error(`[Config Persistence] Skipping route "${r.name}" (${r.id}): missing pathPattern`);
+      return null;
+    }
+    if (typeof r.code !== 'string' || !r.code.trim()) {
+      console.error(`[Config Persistence] Skipping route "${r.name}" (${r.id}): missing code block`);
+      return null;
+    }
+    const validStrategies = ['prefix', 'contains', 'equal', 'regex'];
+    const validTargets = ['path', 'host', 'both'];
+    // Unknown http methods from newer versions are dropped, never crash.
+    const validMethods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'ALL'];
+    const httpMethods = Array.isArray(r.httpMethods)
+      ? r.httpMethods.filter((m: any) => validMethods.includes(m))
+      : [];
+    return {
+      id: r.id,
+      appId: r.appId,
+      name: r.name.trim(),
+      description: typeof r.description === 'string' ? r.description : '',
+      matchTarget: validTargets.includes(r.matchTarget) ? r.matchTarget : 'path',
+      matchStrategy: validStrategies.includes(r.matchStrategy) ? r.matchStrategy : 'prefix',
+      pathPattern: normalizeRoutePattern(r.pathPattern.trim()),
+      hostPattern: typeof r.hostPattern === 'string' ? r.hostPattern : '*',
+      // Unknown future fields (e.g. ignoreTls) are preserved so a downgrade
+      // never silently drops user settings.
+      ...(r.proxyTarget !== undefined ? { proxyTarget: r.proxyTarget } : {}),
+      ...(r.ignoreTls !== undefined ? { ignoreTls: r.ignoreTls } : {}),
+      httpMethods: httpMethods.length ? httpMethods : ['GET'],
+      code: r.code,
+      enabled: r.enabled !== false,
+      priority: Number.isFinite(Number(r.priority)) ? Number(r.priority) : 10,
+      engine: (r.engine === 'process' || r.engine === 'isolatedvm') ? r.engine : 'isolatedvm',
+      isDefault: false,
+      createdAt: typeof r.createdAt === 'string' ? r.createdAt : new Date().toISOString(),
+      updatedAt: typeof r.updatedAt === 'string' ? r.updatedAt : new Date().toISOString()
+    } as Route;
+  } catch (err: any) {
+    console.error(`[Config Persistence] Skipping malformed route entry: ${err?.message || err}`);
+    return null;
   }
 }
 

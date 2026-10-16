@@ -90,22 +90,43 @@ async function startServer() {
   state.httpServer = app.listen(state.serverConfig.listenPort, state.serverConfig.listenHost, () => {
     console.log(`Relay Server & Web Hub listening on http://${state.serverConfig.listenHost}:${state.serverConfig.listenPort}`);
   });
+  state.httpServer.on('error', (err: any) => {
+    // Port conflict / permission errors must not kill the process: keep
+    // running so the admin API stays reachable and the user can fix it.
+    console.error(`[Relay Server] Listener error on ${state.serverConfig.listenHost}:${state.serverConfig.listenPort}: ${err?.message || err}`);
+  });
   attachUpgradeBridge(state.httpServer);
 
   try {
     const engineKind = (process.env.RELAY_ENGINE === 'process' ? 'process' : 'isolatedvm');
     state.residentEngineKind = engineKind;
-    state.activeEngine = createEngine(engineKind, {
-      modulesDir: ROUTE_MODULES_DIR,
-      scriptsDir: ROUTE_SCRIPTS_DIR,
-      allowFs: false,
-      timeoutMs: 30000,
-      poolSize: Math.max(1, Math.min(os.cpus().length, 4)),
-      autoInstall: AUTO_INSTALL_ENABLED
-    });
-    console.log(`[Engine] Resident engine initialized: ${state.activeEngine.name}`);
+    try {
+      state.activeEngine = createEngine(engineKind, {
+        modulesDir: ROUTE_MODULES_DIR,
+        scriptsDir: ROUTE_SCRIPTS_DIR,
+        allowFs: false,
+        timeoutMs: 30000,
+        poolSize: Math.max(1, Math.min(os.cpus().length, 4)),
+        autoInstall: AUTO_INSTALL_ENABLED
+      });
+      console.log(`[Engine] Resident engine initialized: ${state.activeEngine.name}`);
+    } catch (inner: any) {
+      // Fall back to the other engine so a broken native dep never blocks boot.
+      const fallback = engineKind === 'process' ? 'isolatedvm' : 'process';
+      console.error(`[Engine] Resident engine "${engineKind}" failed (${inner?.message || inner}), trying "${fallback}"...`);
+      state.residentEngineKind = fallback as any;
+      state.activeEngine = createEngine(fallback as any, {
+        modulesDir: ROUTE_MODULES_DIR,
+        scriptsDir: ROUTE_SCRIPTS_DIR,
+        allowFs: false,
+        timeoutMs: 30000,
+        poolSize: Math.max(1, Math.min(os.cpus().length, 4)),
+        autoInstall: AUTO_INSTALL_ENABLED
+      });
+      console.log(`[Engine] Resident engine initialized (fallback): ${state.activeEngine.name}`);
+    }
   } catch (err: any) {
-    console.error(`[Engine] Failed to initialize resident engine (${process.env.RELAY_ENGINE || 'isolatedvm'}): ${err.message}`);
+    console.error(`[Engine] Failed to initialize any engine: ${err?.message || err} — routes will return 500, server keeps running.`);
   }
 
   setInterval(() => {

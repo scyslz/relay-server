@@ -4,12 +4,32 @@ import path from 'path';
 import * as crypto from 'crypto';
 import * as fsMod from 'fs';
 import { Socket as NetSocket } from 'net';
-import { WebSocket as WsWebSocket } from 'ws';
+import { createRequire } from 'module';
 import { Route } from '../../../shared/types';
 import { RouteEngine, ExecutionRequest, ExecutionResult, EngineOptions, DEFAULT_ENGINE_OPTIONS, BridgeRequest, BridgeDecision } from '../types';
 import { ensureBareImportsInstalled, InstallContext } from '../modules';
 import { bundleRoute } from './bundler';
 import { buildPrelude } from './prelude';
+
+// `ws` is loaded lazily: older images were built without it (it was missing
+// from the Dockerfile deps stage). A static import would crash the whole
+// server bundle with "Cannot find package 'ws'" before anything starts.
+// Missing `ws` only disables WebSocket routes, never boot.
+declare const require: any | undefined;
+let WsWebSocket: any = null;
+try {
+  const wsMod: any = (typeof require === 'function')
+    // CJS bundle (dist/server.cjs): real require, kept external by esbuild.
+    ? require('ws')
+    // ESM dev (tsx): no require — resolve relative to the project root.
+    : createRequire(path.join(process.cwd(), 'package.json'))('ws');
+  WsWebSocket = wsMod?.WebSocket || wsMod || null;
+} catch {
+  WsWebSocket = null;
+}
+if (!WsWebSocket) {
+  console.warn('[Engine] Optional package "ws" not found — WebSocket routes will fail at runtime, server keeps running.');
+}
 
 // The isolatedvm engine runs each route inside a real V8 isolate with a memory
 // cap and no shared process. Capabilities are bridged to the host through a
@@ -240,7 +260,7 @@ interface IsolateEntry {
   timers: Map<number, NodeJS.Timeout>;
   // which request owns each host timer (for per-request cleanup)
   timerOwner: Map<number, number>;
-  wsConns: Map<number, import('ws').WebSocket>;
+  wsConns: Map<number, any>;
   // which request owns each host ws connection (for per-request cleanup)
   wsOwner: Map<number, number>;
   // host-side in-flight fetch AbortControllers, keyed by sandbox fetch id
@@ -762,6 +782,10 @@ export class IsolatedVmEngine implements RouteEngine {
   }
 
   private runHostWs(entry: IsolateEntry, sandboxId: number, url: string, insecure: boolean): void {
+    if (!WsWebSocket) {
+      this.pushWsEvent(entry, sandboxId, 'error', 'WebSocket support unavailable (missing "ws" package)');
+      return;
+    }
     try {
       const ws = new WsWebSocket(url, { rejectUnauthorized: !insecure });
       entry.wsConns.set(sandboxId, ws);

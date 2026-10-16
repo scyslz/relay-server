@@ -17,7 +17,7 @@ FROM node:20-alpine AS deps
 WORKDIR /deps
 RUN apk add --no-cache --virtual .build-deps python3 make g++ \
     && npm init -y >/dev/null \
-    && npm install --omit=dev --omit=optional --no-audit --no-fund express@4.21.2 selfsigned@2.4.1 undici@7.29.0 isolated-vm@5.0.4 \
+    && npm install --omit=dev --omit=optional --no-audit --no-fund express@4.21.2 selfsigned@2.4.1 undici@7.29.0 isolated-vm@5.0.4 ws@8.18.0 \
     && npm cache clean --force \
     && apk del .build-deps
 

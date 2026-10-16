@@ -27,6 +27,9 @@ export interface Route {
   enabled: boolean;
   priority: number; // Lower number = higher priority
   engine?: RouteEngineKind; // Preferred runtime for this route (defaults to resident engine)
+  // Per-route fetch TLS bypass (older configs): skip HTTPS cert verification
+  // for fetch() calls made by this route's code. Preserved for compat.
+  ignoreTls?: boolean;
   isDefault?: boolean;
   createdAt: string;
   updatedAt: string;
