@@ -98,7 +98,17 @@ async function startServer() {
   attachUpgradeBridge(state.httpServer);
 
   try {
-    const engineKind = (process.env.RELAY_ENGINE === 'process' ? 'process' : 'isolatedvm');
+    let engineKind = (process.env.RELAY_ENGINE === 'process' ? 'process' : 'isolatedvm');
+    // A broken isolated-vm native build SIGSEGVs (exit 139) instead of
+    // throwing — no try/catch can intercept it. Probe in a child process
+    // first and fall back to process BEFORE touching it in-process.
+    if (engineKind === 'isolatedvm') {
+      const { isIsolatedVmUsable } = await import('./engine/isolatedvm-probe');
+      if (!isIsolatedVmUsable()) {
+        console.error('[Engine] isolated-vm unusable on this machine, using process engine instead.');
+        engineKind = 'process';
+      }
+    }
     state.residentEngineKind = engineKind;
     try {
       state.activeEngine = createEngine(engineKind, {

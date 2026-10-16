@@ -2,6 +2,7 @@ import os from 'os';
 import { Route } from '../shared/types';
 import { createEngine, EngineKind, RouteEngine } from './engine';
 import { state, ROUTE_MODULES_DIR, ROUTE_SCRIPTS_DIR, AUTO_INSTALL_ENABLED } from './state';
+import { isIsolatedVmUsable } from './engine/isolatedvm-probe';
 
 // Idle grace period before the lazily-started secondary engine is disposed
 // and its worker processes / isolates are reclaimed.
@@ -21,7 +22,12 @@ export function resolveEngineKind(route: Route): EngineKind {
 // Returns the engine that should run this route, starting the secondary
 // engine lazily when the route prefers the non-resident runtime.
 export async function getEngineForRoute(route: Route): Promise<RouteEngine | null> {
-  const wanted = resolveEngineKind(route);
+  let wanted = resolveEngineKind(route);
+  // Never touch a crashing isolated-vm in-process: route it to the resident
+  // (already-probed) engine instead.
+  if (wanted === 'isolatedvm' && state.residentEngineKind !== 'isolatedvm' && !isIsolatedVmUsable()) {
+    return state.activeEngine;
+  }
   if (wanted === state.residentEngineKind) {
     return state.activeEngine;
   }
